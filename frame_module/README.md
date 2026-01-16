@@ -17,10 +17,12 @@ App developers should not have to embed Flutter themselves.
 
 ### Local dependencies
 
-This module is designed to use the **local** Frame Flutter packages already in this repo:
+This module depends on the Frame Flutter packages:
 
-- `Frame/frame_ble`
-- `Frame/frame_msg`
+- `frame_ble`
+- `frame_msg`
+
+In this repo, they are referenced via their upstream Git repositories (see `pubspec.yaml`), so this module does not rely on any path outside `universal_glasses/`.
 
 ### Prerequisite
 

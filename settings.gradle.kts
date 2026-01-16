@@ -34,6 +34,8 @@ include(":universal")
 include(":core")
 include(":device-rokid")
 include(":device-frame-flutter")
+include(":device-rayneo-installer")
+include(":device-rayneo-runtime")
 
 // Embed the generated Flutter module as an internal dependency when available.
 // This avoids requiring app developers to manually include the Flutter module.

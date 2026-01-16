@@ -3,6 +3,7 @@ package com.universalglasses.core
 enum class GlassesModel {
     FRAME,
     ROKID,
+    RAYNEO,
 }
 
 data class DeviceCapabilities(

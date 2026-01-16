@@ -27,6 +27,10 @@ dependencies {
     // Always include Rokid implementation
     api(project(":device-rokid"))
 
+    // RayNeo: installer (phone-side) + runtime (on-glasses)
+    api(project(":device-rayneo-installer"))
+    api(project(":device-rayneo-runtime"))
+
     // Include Frame when available in this build (i.e., frame_module exists and is included).
     // For published artifacts, ensure the build pipeline always includes device-frame-embedded.
     if (project.findProject(":device-frame-embedded") != null) {
