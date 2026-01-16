@@ -1,0 +1,66 @@
+package com.universalglasses.device.frame.flutter
+
+import com.universalglasses.core.CaptureOptions
+import com.universalglasses.core.ConnectionState
+import com.universalglasses.core.DeviceCapabilities
+import com.universalglasses.core.DisplayOptions
+import com.universalglasses.core.GlassesClient
+import com.universalglasses.core.GlassesEvent
+import com.universalglasses.core.GlassesModel
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.SharingStarted
+
+/**
+ * Frame implementation of [GlassesClient] backed by a host-provided [FrameFlutterBridge].
+ *
+ * The bridge is expected to talk to a Flutter module that uses `frame_ble` + `frame_msg`.
+ */
+class FrameGlassesClient(
+    private val bridge: FrameFlutterBridge,
+) : GlassesClient {
+
+    override val model: GlassesModel = GlassesModel.FRAME
+    override val capabilities: DeviceCapabilities = DeviceCapabilities(
+        canCapturePhoto = true,
+        canDisplayText = true,
+        supportsTapEvents = true,
+        supportsStreamingTextUpdates = true,
+    )
+
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    override val state: StateFlow<ConnectionState> = bridge.state
+        .map { st ->
+            when (st) {
+                FrameFlutterState.Disconnected -> ConnectionState.Disconnected
+                FrameFlutterState.Connecting -> ConnectionState.Connecting
+                FrameFlutterState.Connected -> ConnectionState.Connected
+                is FrameFlutterState.Error -> ConnectionState.Error(
+                    com.universalglasses.core.GlassesError.Transport("Frame error: ${st.message}")
+                )
+            }
+        }
+        .stateIn(scope, SharingStarted.Eagerly, ConnectionState.Disconnected)
+
+    override val events: Flow<GlassesEvent> = bridge.events
+
+    override suspend fun connect(): Result<Unit> = bridge.connect()
+
+    override suspend fun disconnect() {
+        bridge.disconnect()
+        scope.cancel()
+    }
+
+    override suspend fun capturePhoto(options: CaptureOptions) = bridge.capturePhoto(options)
+
+    override suspend fun display(text: String, options: DisplayOptions) = bridge.displayText(text, options)
+}
+
+
