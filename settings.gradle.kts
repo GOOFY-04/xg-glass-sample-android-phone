@@ -1,4 +1,5 @@
 pluginManagement {
+    includeBuild("build-logic")
     repositories {
         google()
         mavenCentral()
@@ -32,6 +33,7 @@ rootProject.name = "universal-glasses"
 // Single entry-point artifact for third-party apps (one dependency line).
 include(":universal")
 include(":core")
+include(":app-contract")
 include(":device-rokid")
 include(":device-frame-flutter")
 include(":device-rayneo-installer")

@@ -3,7 +3,7 @@ plugins {
 }
 
 android {
-    namespace = "com.universalglasses.device.rayneo.runtime"
+    namespace = "com.universalglasses.appcontract"
 }
 
 dependencies {

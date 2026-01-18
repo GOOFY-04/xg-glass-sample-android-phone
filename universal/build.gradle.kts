@@ -1,28 +1,16 @@
 plugins {
-    alias(libs.plugins.android.library)
-    alias(libs.plugins.kotlin.android)
+    id("com.universalglasses.android.library")
 }
 
 android {
     namespace = "com.universalglasses.universal"
-    compileSdk = 34
-
-    defaultConfig {
-        minSdk = 28
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_1_8
-        targetCompatibility = JavaVersion.VERSION_1_8
-    }
-    kotlinOptions {
-        jvmTarget = "1.8"
-    }
 }
 
 dependencies {
     // Expose the stable API surface
     api(project(":core"))
+    // Expose the universal "app entry" contracts (pure Kotlin API used by hosts/plugins).
+    api(project(":app-contract"))
 
     // Always include Rokid implementation
     api(project(":device-rokid"))
