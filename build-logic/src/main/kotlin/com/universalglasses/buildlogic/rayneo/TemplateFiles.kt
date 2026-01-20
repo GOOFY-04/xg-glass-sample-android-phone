@@ -7,7 +7,7 @@ internal data class TemplateFile(
 
 internal object RayneoHostTemplate {
     // Bump this if you change any template content so the generator knows when to refresh.
-    const val TEMPLATE_VERSION = 12
+    const val TEMPLATE_VERSION = 14
 
     fun files(): List<TemplateFile> = listOf(
         TemplateFile(
@@ -175,7 +175,6 @@ internal object RayneoHostTemplate {
 
             import android.Manifest
             import android.os.Bundle
-            import android.os.SystemClock
             import android.widget.Button
             import androidx.activity.result.contract.ActivityResultContracts
             import androidx.core.content.ContextCompat
@@ -215,8 +214,6 @@ internal object RayneoHostTemplate {
                 }
                 private var selectedIndex: Int = 0
                 private var commands: List<com.universalglasses.appcontract.UniversalCommand> = emptyList()
-                private var lastSlideAtMs: Long = 0L
-                private var lastActivateAtMs: Long = 0L
                 private var isRunningCommand: Boolean = false
 
                 private val requestCameraPermission = registerForActivityResult(
@@ -275,7 +272,6 @@ internal object RayneoHostTemplate {
                                     is TempleAction.SlideUpwards,
                                     -> {
                                         if (commands.isNotEmpty()) {
-                                            lastSlideAtMs = SystemClock.elapsedRealtime()
                                             selectedIndex = (selectedIndex + 1).coerceAtMost(commands.lastIndex)
                                             updateSelectionUi()
                                         }
@@ -285,26 +281,12 @@ internal object RayneoHostTemplate {
                                     is TempleAction.SlideDownwards,
                                     -> {
                                         if (commands.isNotEmpty()) {
-                                            lastSlideAtMs = SystemClock.elapsedRealtime()
                                             selectedIndex = (selectedIndex - 1).coerceAtLeast(0)
                                             updateSelectionUi()
                                         }
                                     }
 
-                                    // Some firmwares emit ActionUp/Down; treat Click/ActionUp as "activate".
-                                    is TempleAction.Click,
-                                    is TempleAction.ActionUp,
-                                    -> {
-                                        // Avoid triggering an action immediately after a swipe selection.
-                                        // Many firmwares emit ActionUp at the end of a slide gesture.
-                                        if (action is TempleAction.ActionUp) {
-                                            val now = SystemClock.elapsedRealtime()
-                                            if (now - lastSlideAtMs < 250) return@collect
-                                        }
-                                        val now = SystemClock.elapsedRealtime()
-                                        // Debounce: some firmwares emit Click + ActionUp for one physical click.
-                                        if (now - lastActivateAtMs < 400) return@collect
-                                        lastActivateAtMs = now
+                                    is TempleAction.Click -> {
                                         commands.getOrNull(selectedIndex)?.let { runCommand(env, it) }
                                     }
 
@@ -328,16 +310,16 @@ internal object RayneoHostTemplate {
                                 appendLog("Grant camera permission first")
                                 return@launch
                             }
-                        val ctx = UniversalAppContext(
-                            environment = env,
-                            client = client,
-                            scope = this@UgRayneoHostActivity.scope,
-                            log = { msg -> appendLog(msg) },
-                        )
-                        val r = cmd.run(ctx)
-                        if (r.isFailure) {
-                            appendLog("Failed: ${"$"}{r.exceptionOrNull()?.message ?: "unknown"}")
-                        }
+                            val ctx = UniversalAppContext(
+                                environment = env,
+                                client = client,
+                                scope = this@UgRayneoHostActivity.scope,
+                                log = { msg -> appendLog(msg) },
+                            )
+                            val r = cmd.run(ctx)
+                            if (r.isFailure) {
+                                appendLog("Failed: ${"$"}{r.exceptionOrNull()?.message ?: "unknown"}")
+                            }
                         } finally {
                             isRunningCommand = false
                         }

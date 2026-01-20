@@ -28,8 +28,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.suspendCancellableCoroutine
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
@@ -65,8 +63,6 @@ class RayNeoRuntimeGlassesClient(
     private val _events = MutableSharedFlow<GlassesEvent>(extraBufferCapacity = 64)
     override val events: Flow<GlassesEvent> = _events
 
-    private val captureMutex = Mutex()
-
     override suspend fun connect(): Result<Unit> {
         _state.value = ConnectionState.Connected
         return Result.success(Unit)
@@ -81,7 +77,6 @@ class RayNeoRuntimeGlassesClient(
         if (!hasCameraPermission()) return Result.failure(GlassesError.PermissionDenied)
 
         return try {
-            captureMutex.withLock {
             val timeoutMs = options.timeoutMs
             val width = (options.targetWidth ?: 1920).coerceIn(320, 3840)
             val height = (options.targetHeight ?: 1080).coerceIn(240, 2160)
@@ -99,7 +94,6 @@ class RayNeoRuntimeGlassesClient(
                     sourceModel = GlassesModel.RAYNEO,
                 )
             )
-            }
         } catch (e: Exception) {
             Result.failure(GlassesError.Transport("RayNeo capture failed: ${e.message ?: e::class.java.simpleName}", e))
         }
