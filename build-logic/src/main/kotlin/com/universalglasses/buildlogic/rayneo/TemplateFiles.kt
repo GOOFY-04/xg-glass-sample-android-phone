@@ -7,7 +7,7 @@ internal data class TemplateFile(
 
 internal object RayneoHostTemplate {
     // Bump this if you change any template content so the generator knows when to refresh.
-    const val TEMPLATE_VERSION = 14
+    const val TEMPLATE_VERSION = 15
 
     fun files(): List<TemplateFile> = listOf(
         TemplateFile(
@@ -187,6 +187,7 @@ internal object RayneoHostTemplate {
             import com.universalglasses.appcontract.HostKind
             import com.universalglasses.appcontract.UniversalAppContext
             import com.universalglasses.appcontract.UniversalAppEntry
+            import com.universalglasses.appcontract.commandsWithDefaults
             import com.universalglasses.core.GlassesModel
             import com.universalglasses.device.rayneo.runtime.RayNeoDisplaySink
             import com.universalglasses.device.rayneo.runtime.RayNeoRuntimeGlassesClient
@@ -237,7 +238,7 @@ internal object RayneoHostTemplate {
                     }
 
                     val env = HostEnvironment(hostKind = HostKind.GLASSES, model = GlassesModel.RAYNEO)
-                    commands = entry.commands(env)
+                    commands = entry.commandsWithDefaults(env)
 
                     // Connect early so command handlers can assume connected.
                     scope.launch { client.connect() }

@@ -81,4 +81,42 @@ interface UniversalAppEntry {
     fun commands(env: HostEnvironment): List<UniversalCommand>
 }
 
+/**
+ * Optional simplified entry for developers who want to write one set of commands for all hosts/devices.
+ *
+ * This keeps [UniversalAppEntry] stable (hosts still pass [HostEnvironment]), while allowing developers to
+ * ignore host/device differences by implementing a parameterless [commands].
+ */
+interface UniversalAppEntrySimple : UniversalAppEntry {
+    fun commands(): List<UniversalCommand>
+
+    override fun commands(env: HostEnvironment): List<UniversalCommand> = commands()
+}
+
+/**
+ * Default host-side command filtering policy provided by the SDK.
+ *
+ * This exists so app developers don't have to repeat common "host quirks" in every entry implementation.
+ */
+object UniversalCommandPolicy {
+    /**
+     * Apply SDK defaults for which commands should be exposed in a given host environment.
+     *
+     * Current default:
+     * - RayNeo on PHONE host is installer-only, so we hide commands there by default.
+     */
+    fun filterCommands(env: HostEnvironment, commands: List<UniversalCommand>): List<UniversalCommand> {
+        return if (env.hostKind == HostKind.PHONE && env.model == GlassesModel.RAYNEO) emptyList() else commands
+    }
+}
+
+/**
+ * Convenience wrapper for hosts: apply SDK default filtering on top of [UniversalAppEntry.commands].
+ *
+ * Hosts should prefer calling this over [UniversalAppEntry.commands] directly.
+ */
+fun UniversalAppEntry.commandsWithDefaults(env: HostEnvironment): List<UniversalCommand> {
+    return UniversalCommandPolicy.filterCommands(env, commands(env))
+}
+
 
