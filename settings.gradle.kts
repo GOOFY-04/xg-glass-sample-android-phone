@@ -39,15 +39,22 @@ include(":device-frame-flutter")
 include(":device-rayneo-installer")
 include(":device-rayneo-runtime")
 
+// Keep Gradle module names stable, but place implementations under a dedicated folder.
+project(":device-rokid").projectDir = file("devices/device-rokid")
+project(":device-frame-flutter").projectDir = file("devices/device-frame-flutter")
+project(":device-rayneo-installer").projectDir = file("devices/device-rayneo-installer")
+project(":device-rayneo-runtime").projectDir = file("devices/device-rayneo-runtime")
+
 // Embed the generated Flutter module as an internal dependency when available.
 // This avoids requiring app developers to manually include the Flutter module.
-val flutterInclude = file("frame_module/.android/include_flutter.groovy")
+val flutterInclude = file("third_party/frame/frame_module/.android/include_flutter.groovy")
 if (flutterInclude.exists()) {
     // Flutter's Gradle plugin expects a host app project (default name ":app").
     // We provide a minimal stub here so the embedded Flutter module can be wired at build time.
     include(":app")
     apply(from = flutterInclude)
     include(":device-frame-embedded")
+    project(":device-frame-embedded").projectDir = file("devices/device-frame-embedded")
 }
 
 

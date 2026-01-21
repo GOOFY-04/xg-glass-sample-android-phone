@@ -53,7 +53,7 @@ class UniversalGlassesRayneoAppPlugin : Plugin<Project> {
             require(mercuryDir.isNotBlank()) {
                 "ugRayneo.mercuryAarDir is required to enable RayNeo UI/navigation (Mercury SDK). " +
                     "Point it to a directory containing MercuryAndroidSDK*.aar and RayNeoIPCSDK*.aar.\n" +
-                    "Tried defaults: vendor/rayneo/aar, ../universal_glasses/vendor/rayneo/aar, ../../universal_glasses/vendor/rayneo/aar"
+                    "Tried defaults: third_party/rayneo/aar, vendor/rayneo/aar, ../universal_glasses/third_party/rayneo/aar, ../../universal_glasses/third_party/rayneo/aar"
             }
             val mercurySrcDir = File(mercuryDir)
             require(mercurySrcDir.exists() && mercurySrcDir.isDirectory) { "ugRayneo.mercuryAarDir is not a directory: $mercuryDir" }
@@ -98,10 +98,15 @@ class UniversalGlassesRayneoAppPlugin : Plugin<Project> {
 
     private fun findDefaultMercuryAarDir(project: Project): String? {
         // Heuristics for common repo layouts:
-        // - xg-glass init template might place vendor AARs under consumer root: vendor/rayneo/aar
-        // - in-repo development might keep vendor AARs under the SDK checkout: ../../universal_glasses/vendor/rayneo/aar
+        // - xg-glass init template might place vendor AARs under consumer root: third_party/rayneo/aar (preferred)
+        // - keep vendor/rayneo/aar as backward compatible fallback
+        // - in-repo development might keep vendor AARs under the SDK checkout: ../../universal_glasses/third_party/rayneo/aar
         val root = project.rootProject.rootDir
         val candidates = listOf(
+            File(root, "third_party/rayneo/aar"),
+            File(root, "vendor/rayneo/aar"),
+            File(root, "../universal_glasses/third_party/rayneo/aar"),
+            File(root, "../../universal_glasses/third_party/rayneo/aar"),
             File(root, "vendor/rayneo/aar"),
             File(root, "../universal_glasses/vendor/rayneo/aar"),
             File(root, "../../universal_glasses/vendor/rayneo/aar"),

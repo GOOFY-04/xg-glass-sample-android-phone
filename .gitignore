@@ -31,22 +31,22 @@ local.properties
 *.log
 
 # ----------------------------
-# Flutter module (./frame_module)
+# Flutter module (./third_party/frame/frame_module)
 # ----------------------------
 
 # Flutter tool caches / build outputs
-frame_module/.dart_tool/
-frame_module/build/
-frame_module/.flutter-plugins
-frame_module/.flutter-plugins-dependencies
-frame_module/.metadata
+third_party/frame/frame_module/.dart_tool/
+third_party/frame/frame_module/build/
+third_party/frame/frame_module/.flutter-plugins
+third_party/frame/frame_module/.flutter-plugins-dependencies
+third_party/frame/frame_module/.metadata
 
 # Generated platform scaffolding (re-create with `flutter create -t module ...`)
-frame_module/.android/
-frame_module/.ios/
+third_party/frame/frame_module/.android/
+third_party/frame/frame_module/.ios/
 
 # Optional: lockfile (commit if you want reproducible app-like builds; ignore to reduce churn)
-frame_module/pubspec.lock
+third_party/frame/frame_module/pubspec.lock
 
 # ----------------------------
 # RayNeo vendor AARs
@@ -54,3 +54,5 @@ frame_module/pubspec.lock
 
 MercuryAndroidSDK-v0.2.3-20260104184638_9002bcc8.aar
 RayNeoIPCSDK-For-Android-V0.1.0-20231128201840_9b41f025.aar
+
+

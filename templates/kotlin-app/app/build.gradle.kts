@@ -50,8 +50,8 @@ ugRayneo {
     appEntryClass.set("__XG_ENTRY_CLASS__")
     logicProjectPath.set(":ug_app_logic")
     // RayNeo/Mercury vendor AARs (used for temple gestures / navigation on glasses)
-    // Replaced by xg-glass init: __XG_SDK_PATH__/vendor/rayneo/aar
-    mercuryAarDir.set(File(rootDir, "__XG_SDK_PATH__/vendor/rayneo/aar").absolutePath)
+    // Replaced by xg-glass init: __XG_SDK_PATH__/third_party/rayneo/aar
+    mercuryAarDir.set(File(rootDir, "__XG_SDK_PATH__/third_party/rayneo/aar").absolutePath)
     // hostProjectPath defaults to :ug_rayneo_glass_host
     // assetApkName defaults to rayneo_glass_app.apk
     // variant defaults to debug

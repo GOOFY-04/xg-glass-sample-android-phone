@@ -1,39 +1,40 @@
-## Frame Flutter Module (no-UI) for universal_glasses
+# Frame Flutter Module (no-UI) for universal_glasses
 
 This folder contains a **Flutter-module template** that exposes Frame capabilities to Android via:
 
-- MethodChannel: `universal_glasses/frame/methods`
+- MethodChannel name: `universal_glasses/frame/methods`
 - (Bidirectional) MethodChannel callback: Flutter calls `onEvent` to push events to Android
 
 The channel names and payload formats follow:
-- `universal_glasses/device-frame-flutter/.../FrameFlutterChannelContract.kt`
 
-### Why this exists
+- `universal_glasses/devices/device-frame-flutter/.../FrameFlutterChannelContract.kt`
+
+## Why this exists
 
 App developers should not have to embed Flutter themselves.
 
-- During **in-repo development**, `universal_glasses` includes the generated module (`frame_module/.android/...`) and owns a `FlutterEngine` internally (`device-frame-embedded`).
+- During **in-repo development**, `universal_glasses` includes the generated module (`third_party/frame/frame_module/.android/...`) and owns a `FlutterEngine` internally (`device-frame-embedded`).
 - For **real distribution**, the goal is to publish a **prebuilt Flutter AAR** from this module and ship it as part of the universal SDK, so app developers only depend on the SDK.
 
-### Local dependencies
+## Local dependencies
 
 This module depends on the Frame Flutter packages:
 
 - `frame_ble`
 - `frame_msg`
 
-In this repo, they are referenced via their upstream Git repositories (see `pubspec.yaml`), so this module does not rely on any path outside `universal_glasses/`.
+They are pulled from upstream Git (see `pubspec.yaml`).
 
-### Prerequisite
+## Prerequisite
 
 You need Flutter installed locally to generate the module scaffolding (`.android/`, Gradle glue, etc.).
 
-### Create / regenerate the Flutter module locally
+## Create / regenerate the Flutter module locally
 
 From repo root:
 
 ```bash
-flutter create -t module universal_glasses/frame_module
+flutter create -t module universal_glasses/third_party/frame/frame_module
 ```
 
 Then **merge** the files from this repo version back in (because `flutter create` may overwrite some):
@@ -43,11 +44,9 @@ Then **merge** the files from this repo version back in (because `flutter create
 - `lib/universal_frame_bridge.dart`
 - `assets/lua/*`
 
-### What it provides
+## What it provides
 
 - `connect`: scans + connects via `frame_ble`, uploads Lua libs + `ug_frame_app.lua`, starts frameside loop
 - `capturePhoto`: sends `TxCaptureSettings` via `sendMessage` and returns a full JPEG (`Uint8List`)
 - `displayText`: sends `TxPlainText` via `sendMessage`
 - events: state/log/tap (sent to Android via `onEvent`)
-
-
