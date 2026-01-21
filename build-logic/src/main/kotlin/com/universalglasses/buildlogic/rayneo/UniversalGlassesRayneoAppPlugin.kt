@@ -46,10 +46,14 @@ class UniversalGlassesRayneoAppPlugin : Plugin<Project> {
             patchHostFiles(hostProject.projectDir, logicProjectPath = logicPath, appEntryClass = entryClass)
 
             // Sync vendor SDK AARs into the generated host module.
-            val mercuryDir = ext.mercuryAarDir.orNull?.trim().orEmpty()
+            val mercuryDir = ext.mercuryAarDir.orNull
+                ?.trim()
+                .orEmpty()
+                .ifBlank { findDefaultMercuryAarDir(project).orEmpty() }
             require(mercuryDir.isNotBlank()) {
                 "ugRayneo.mercuryAarDir is required to enable RayNeo UI/navigation (Mercury SDK). " +
-                    "Point it to a directory containing MercuryAndroidSDK*.aar and RayNeoIPCSDK*.aar."
+                    "Point it to a directory containing MercuryAndroidSDK*.aar and RayNeoIPCSDK*.aar.\n" +
+                    "Tried defaults: vendor/rayneo/aar, ../universal_glasses/vendor/rayneo/aar, ../../universal_glasses/vendor/rayneo/aar"
             }
             val mercurySrcDir = File(mercuryDir)
             require(mercurySrcDir.exists() && mercurySrcDir.isDirectory) { "ugRayneo.mercuryAarDir is not a directory: $mercuryDir" }
@@ -90,6 +94,23 @@ class UniversalGlassesRayneoAppPlugin : Plugin<Project> {
                 dependsOn(copyTask)
             }
         }
+    }
+
+    private fun findDefaultMercuryAarDir(project: Project): String? {
+        // Heuristics for common repo layouts:
+        // - xg-glass init template might place vendor AARs under consumer root: vendor/rayneo/aar
+        // - in-repo development might keep vendor AARs under the SDK checkout: ../../universal_glasses/vendor/rayneo/aar
+        val root = project.rootProject.rootDir
+        val candidates = listOf(
+            File(root, "vendor/rayneo/aar"),
+            File(root, "../universal_glasses/vendor/rayneo/aar"),
+            File(root, "../../universal_glasses/vendor/rayneo/aar"),
+        )
+        return candidates
+            .firstOrNull { dir ->
+                dir.isDirectory && (dir.listFiles()?.any { it.isFile && it.extension.equals("aar", ignoreCase = true) } == true)
+            }
+            ?.absolutePath
     }
 
     private fun patchHostFiles(hostDir: File, logicProjectPath: String, appEntryClass: String) {
