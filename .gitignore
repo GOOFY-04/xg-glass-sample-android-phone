@@ -31,6 +31,14 @@ local.properties
 *.log
 
 # ----------------------------
+# Python caches (xg-glass CLI)
+# ----------------------------
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# ----------------------------
 # Flutter module (./third_party/frame/frame_module)
 # ----------------------------
 
