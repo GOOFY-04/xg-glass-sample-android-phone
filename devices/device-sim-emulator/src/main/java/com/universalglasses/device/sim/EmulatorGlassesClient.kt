@@ -4,7 +4,6 @@ import android.Manifest
 import android.graphics.BitmapFactory
 import android.media.AudioRecord
 import android.media.MediaRecorder
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -51,10 +50,11 @@ import kotlin.coroutines.resumeWithException
  * Behavior:
  * - connect()/disconnect(): no physical glasses, so it's effectively a no-op lifecycle.
  * - capturePhoto(): uses Android camera (on Emulator this can be backed by host webcam).
- * - display(): shows text via an Activity on the emulator screen.
+ * - display(): shows text in the host UI via a sink provided by the host app.
  */
 class EmulatorGlassesClient(
     private val activity: AppCompatActivity,
+    private val displaySink: ((String) -> Unit)? = null,
 ) : GlassesClient {
 
     override val model: GlassesModel = GlassesModel.SIMULATOR
@@ -183,8 +183,12 @@ class EmulatorGlassesClient(
     override suspend fun display(text: String, options: DisplayOptions): Result<Unit> {
         return try {
             withContext(Dispatchers.Main) {
-                Toast.makeText(activity, text, Toast.LENGTH_LONG).show()
-                activity.startActivity(SimDisplayActivity.newIntent(activity, text))
+                val sink = displaySink
+                if (sink != null) {
+                    sink.invoke(text)
+                } else {
+                    emitWarn("Simulator: display ignored (no displaySink provided)")
+                }
             }
             emitLog("Simulator: display => ok")
             Result.success(Unit)

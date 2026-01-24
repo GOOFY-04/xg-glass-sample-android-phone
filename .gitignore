@@ -16,6 +16,8 @@
 **/build/
 **/out/
 captures/
+build-logic/bin/
+.xg_glass_tmp/
 
 # Local config (machine-specific)
 local.properties

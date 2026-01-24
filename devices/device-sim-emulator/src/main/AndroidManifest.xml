@@ -8,7 +8,7 @@
         <activity
             android:name="com.universalglasses.device.sim.SimDisplayActivity"
             android:exported="false"
-            android:theme="@android:style/Theme.DeviceDefault.Light.NoActionBar" />
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar" />
     </application>
 
 </manifest>

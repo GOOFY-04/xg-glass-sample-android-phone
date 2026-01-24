@@ -43,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spDevice: Spinner
     private lateinit var btnConnect: Button
     private lateinit var ivPreview: ImageView
+    private lateinit var tvDisplay: TextView
     private lateinit var etRayNeoIp: EditText
     private lateinit var llCommands: LinearLayout
 
@@ -78,6 +79,7 @@ class MainActivity : AppCompatActivity() {
         spDevice = findViewById(R.id.spDevice)
         btnConnect = findViewById(R.id.btnConnect)
         ivPreview = findViewById(R.id.ivPreview)
+        tvDisplay = findViewById(R.id.tvDisplay)
         etRayNeoIp = findViewById(R.id.etRayNeoIp)
         llCommands = findViewById(R.id.llCommands)
 
@@ -142,7 +144,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             val newClient = when (model) {
-                GlassesModel.SIMULATOR -> EmulatorGlassesClient(this@MainActivity)
+                GlassesModel.SIMULATOR -> EmulatorGlassesClient(this@MainActivity) { text ->
+                    tvDisplay.text = text
+                }
                 GlassesModel.ROKID -> RokidGlassesClient(this@MainActivity)
                 GlassesModel.FRAME -> {
                 // SDK-owned Flutter engine + bridge
