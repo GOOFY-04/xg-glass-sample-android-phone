@@ -41,6 +41,11 @@ def main(argv: list[str] | None = None) -> int:
         default="com.example.xgglassapp.logic.ExampleAppEntry",
         help="Fully-qualified UniversalAppEntry class name (default: com.example.xgglassapp.logic.ExampleAppEntry).",
     )
+    p_init.add_argument(
+        "--sim",
+        action="store_true",
+        help="Initialize the project in emulator mode (enables x86_64 + simulator backend).",
+    )
 
     p_build = sub.add_parser("build", help="Build the phone-side APK.")
     _add_common_project_args(p_build)
@@ -48,7 +53,6 @@ def main(argv: list[str] | None = None) -> int:
     p_build.add_argument("--entry-class", help="Override entry class (optional).")
     p_build.add_argument("--sdk", help="Override sdkPath (optional).")
     p_build.add_argument("--rayneo-aar-dir", help="Override RayNeo mercuryAarDir (optional).")
-    p_build.add_argument("--sim", action="store_true", help="Build an emulator-compatible APK (enables x86_64 + simulator mode).")
 
     p_install = sub.add_parser("install", help="Install the phone-side APK via adb.")
     _add_common_project_args(p_install)
@@ -185,6 +189,9 @@ def cmd_init(args: argparse.Namespace) -> int:
     # Generate local.properties from env if possible (do not copy template's machine-specific file).
     _write_local_properties(dst)
 
+    if bool(getattr(args, "sim", False)):
+        _apply_simulator_build_settings(dst, enabled=True)
+
     print(f"Created project: {dst}")
     print("Next:")
     print(f"  cd {dst}")
@@ -208,8 +215,6 @@ def cmd_build(args: argparse.Namespace) -> int:
     _apply_cfg_to_project(project, cfg)
     _ensure_flutter_module_ready(project, cfg)
 
-    if bool(getattr(args, "sim", False)):
-        _apply_simulator_build_settings(project, enabled=True)
 
     variant = cfg.variant
     module = cfg.module

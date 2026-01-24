@@ -100,10 +100,19 @@ cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass run
 ```
 
-For simulation, add `--sim` into the command, e.g.,
+For simulation, add a `--sim` and the app will be installed and run on your local Android emulator.
 ```bash
 ./xg-glass run --sim /path/to/MyEntry.kt
 ```
+For the stable workflow, initialize your project with `--sim` and then build/install/run normally.
+```bash
+./xg-glass init --sim /path/to/myapp
+cd /path/to/myapp
+/path/to/xg-glass-sdk/xg-glass build
+/path/to/xg-glass-sdk/xg-glass install
+/path/to/xg-glass-sdk/xg-glass run
+```
+
 
 ### Contributors (extend the SDK)
 
