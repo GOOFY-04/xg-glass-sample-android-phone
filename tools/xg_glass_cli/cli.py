@@ -273,7 +273,9 @@ def cmd_run(args: argparse.Namespace) -> int:
             keep = bool(getattr(args, "keep_tmp", False))
 
         _init_project(dst=project_dir, template=DEFAULT_TEMPLATE, sdk=sdk, entry_class=entry_class)
+        kt_text = kt.read_text(encoding="utf-8")
         _copy_kt_into_project(project_dir, kt)
+        _maybe_enable_openai_kotlin(project_dir=project_dir, sdk=sdk, kt_text=kt_text)
 
         if bool(getattr(args, "sim", False)):
             _apply_simulator_build_settings(project_dir, enabled=True)
@@ -759,5 +761,32 @@ def _init_project(*, dst: Path, template: Path, sdk: Path, entry_class: str) -> 
             entry_class=str(entry_class),
         )
     )
+
+
+def _maybe_enable_openai_kotlin(*, project_dir: Path, sdk: Path, kt_text: str) -> None:
+    """
+    Convenience: if the entry Kotlin file uses `com.aallam.openai`, automatically add the
+    OpenAI Kotlin client dependency to the generated project.
+    """
+    if "com.aallam.openai" not in kt_text and "OpenAI(" not in kt_text:
+        return
+
+    ug_gradle = project_dir / "ug_app_logic" / "build.gradle.kts"
+    if ug_gradle.exists():
+        s = ug_gradle.read_text(encoding="utf-8")
+        if "com.aallam.openai:openai-client-bom" in s or "com.aallam.openai:openai-client" in s:
+            return
+        deps = '\n'.join(
+            [
+                '    // OpenAI Kotlin client (Maven Central)',
+                '    implementation(platform("com.aallam.openai:openai-client-bom:4.0.1"))',
+                '    implementation("com.aallam.openai:openai-client")',
+                '    // Http engine for Ktor (required at runtime on JVM/Android)',
+                '    implementation("io.ktor:ktor-client-okhttp")',
+            ]
+        )
+        if "dependencies {" in s:
+            s = s.replace("dependencies {", "dependencies {\n" + deps, 1)
+            ug_gradle.write_text(s, encoding="utf-8")
 
 

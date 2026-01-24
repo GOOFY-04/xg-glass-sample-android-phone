@@ -84,7 +84,7 @@ class MainActivity : AppCompatActivity() {
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
         } else {
-            listOf("SIMULATOR", "ROKID", "FRAME", "RAYNEO")
+            listOf("ROKID", "FRAME", "RAYNEO")
         }
         spDevice.adapter = ArrayAdapter(
             this,
@@ -214,6 +214,7 @@ class MainActivity : AppCompatActivity() {
 
         if (model == GlassesModel.SIMULATOR) {
             perms += Manifest.permission.CAMERA
+            perms += Manifest.permission.RECORD_AUDIO
         }
 
         // BLE permissions (Frame + Rokid only)
