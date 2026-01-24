@@ -26,7 +26,7 @@ Smart glasses development is supposed to be easy. If you want to build an applic
 - Display output
 - Audio output
 
-This is what xg.glass has extracted for you from tens of smart glasses SDKs. We hide all details of communicating with difference glasses' SDKs and make sure that the code that you develop based on xg.glass can smoothly run on multiple glasses without any single line of additional effort.
+This is what xg.glass has extracted for you from tens of smart glasses SDKs. We hide all details of communicating with difference glasses' SDKs and make sure that the code that you develop based on xg.glass can smoothly run on multiple glasses or a simulator without any single line of additional effort.
 
 Currently we support:
 
@@ -37,6 +37,7 @@ Currently we support:
 - **RayNeo**
   - x2 Glasses
   - x3 Pro Glasses
+- **Simulation**
 
 We're working on and will support soon:
 
@@ -60,6 +61,7 @@ If you are an **app developer**, start with:
 - **Android SDK + platform tools** (you need `adb` on your `PATH`)
 - **An Android phone** with USB debugging enabled
 - **Flutter** is required on your machine since the SDK embeds a Flutter module at build time for Frame
+- **Android emulator** is required if you want to use the simulation mode
 
 #### Installation
 
@@ -96,6 +98,11 @@ cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass build
 /path/to/xg-glass-sdk/xg-glass install
 /path/to/xg-glass-sdk/xg-glass run
+```
+
+For simulation, add `--sim` into the command, e.g.,
+```bash
+./xg-glass run --sim /path/to/MyEntry.kt
 ```
 
 ### Contributors (extend the SDK)
