@@ -50,11 +50,6 @@ Welcome the contributions from the community on more glasses!
 
 ### App developers (build apps with the SDK)
 
-If you are an **app developer**, start with:
-
-- [Developer Guide](https://xg.glass/developer-guide/)
-- [CLI Reference](https://xg.glass/cli-reference/)
-
 #### Prerequisites
 
 - **JDK 17**
@@ -72,13 +67,6 @@ git clone <this-repo>
 cd <this-repo>
 ./xg-glass --help
 ```
-
-Required for **RayNeo**:
-
-- Download the vendor AARs (not redistributed in this repo):
-  - [`MercuryAndroidSDK*.aar`](https://leiniao-ibg.feishu.cn/wiki/ZK2LwOtoSi42DckWtuGc91wkn8e)
-  - [`RayNeoIPCSDK*.aar`](https://leiniao-ibg.feishu.cn/file/Ctaibd0xNozMjvx3amTcCShgn7d)
-- Place them under `./third_party/rayneo/aar/`.
 
 #### Quickstart
 
@@ -100,12 +88,13 @@ cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass run
 ```
 
-For simulation, add a `--sim` and the app will be installed and run on your local Android emulator.
+We also support a simulator (simply add `--sim`) for development and testing that can run on your PC with a webcam:
+
 ```bash
+# Quick mode
 ./xg-glass run --sim /path/to/MyEntry.kt
-```
-For the stable workflow, initialize your project with `--sim` and then build/install/run normally.
-```bash
+
+# Stable workflow
 ./xg-glass init --sim /path/to/myapp
 cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass build
@@ -113,6 +102,10 @@ cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass run
 ```
 
+For more details, see the following documentation:
+
+- [Developer Guide](https://xg.glass/developer-guide/)
+- [CLI Reference](https://xg.glass/cli-reference/)
 
 ### Contributors (extend the SDK)
 
