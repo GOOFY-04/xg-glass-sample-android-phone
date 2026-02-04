@@ -1,4 +1,4 @@
-<h3 align="center">
+<img width="632" height="533" alt="image" src="https://github.com/user-attachments/assets/b42a6755-8551-4e42-a901-aba9aa840f1c" /><h3 align="center">
 xg.glass
 </h3>
 
@@ -76,7 +76,7 @@ The fastest workflow is to run a single Kotlin file:
 ./xg-glass run /path/to/MyEntry.kt
 ```
 
-`MyEntry.kt` must follow a small format contract. See the [Developer Guide](https://xg.glass/developer-guide/) for details.
+`MyEntry.kt` must follow a small format contract. See the [Developer Guide](https://xg.glass/developer-guide/) for details. We provide several examples at :link:[xg-glass-sample](https://github.com/hkust-spark/xg-glass-sample)
 
 For a stable workflow, generate a minimal project and iterate:
 
