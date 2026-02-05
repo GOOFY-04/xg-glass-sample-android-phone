@@ -39,6 +39,7 @@ local.properties
 *.pyc
 *.pyo
 *.pyd
+xg_glass_sdk.egg-info/
 
 # ----------------------------
 # Flutter module (./third_party/frame/frame_module)

@@ -65,15 +65,17 @@ Currently, the SDK is consumed from source:
 ```bash
 git clone <this-repo>
 cd <this-repo>
-./xg-glass --help
+pip install -e .
 ```
+
+If a usage menu is printed by `xg-glass --help`, the xg-glass SDK is installed successfully.
 
 #### Quickstart
 
 The fastest workflow is to run a single Kotlin file:
 
 ```bash
-./xg-glass run /path/to/MyEntry.kt
+xg-glass run /path/to/MyEntry.kt
 ```
 
 `MyEntry.kt` must follow a small format contract. See the [Developer Guide](https://xg.glass/developer-guide/) for details. We provide several examples at :link:[xg-glass-sample](https://github.com/hkust-spark/xg-glass-sample)
@@ -81,7 +83,7 @@ The fastest workflow is to run a single Kotlin file:
 For a stable workflow, generate a minimal project and iterate:
 
 ```bash
-./xg-glass init /path/to/myapp
+xg-glass init /path/to/myapp
 cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass build
 /path/to/xg-glass-sdk/xg-glass install
@@ -92,10 +94,10 @@ We also support a simulator (simply add `--sim`) for development and testing tha
 
 ```bash
 # Quick mode
-./xg-glass run --sim /path/to/MyEntry.kt
+xg-glass run --sim /path/to/MyEntry.kt
 
 # Stable workflow
-./xg-glass init --sim /path/to/myapp
+xg-glass init --sim /path/to/myapp
 cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass build
 /path/to/xg-glass-sdk/xg-glass install

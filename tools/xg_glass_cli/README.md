@@ -9,9 +9,9 @@ This is a minimal command-line tool for driving an Android host project based on
 
 ## Typical usage (same repo)
 
-From the repository root (where `./xg-glass` lives):
+From the repository root (where `xg-glass` lives):
 
-- `./xg-glass init /path/to/myapp`
+- `xg-glass init /path/to/myapp`
 - `cd /path/to/myapp`
 - `<path-to-sdk-repo>/xg-glass build`
 - `<path-to-sdk-repo>/xg-glass install`
