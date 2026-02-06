@@ -25,4 +25,17 @@ The `settings.gradle.kts` / `app/build.gradle.kts` / `AndroidManifest.xml` in th
 
 These will be replaced with actual values by `xg-glass init`.
 
+### Rokid note (CXR-M v1.0.4)
 
+If you are connecting to **Rokid** glasses, CXR-M **v1.0.4** requires an SN authorization file (`.lc`) and your developer `clientSecret`.
+
+- Put the SN authorization file into: `app/src/main/res/raw/`
+  - Example: `app/src/main/res/raw/sn_0a9813....lc` (resource name is `sn_0a9813....`, **without** extension)
+- Add the following to your project root `local.properties` (**do not commit it**):
+
+```properties
+rokid.clientSecret=xxxxxxxxxxxxxxxx
+rokid.snRawName=sn_0a9813....
+```
+
+Alternatively, you can set environment variables: `ROKID_CLIENT_SECRET` and `ROKID_SN_RAW_NAME`.

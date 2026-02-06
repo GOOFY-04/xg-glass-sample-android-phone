@@ -65,6 +65,7 @@ import kotlin.coroutines.suspendCoroutine
  *
  * Notes:
  * - This SDK does NOT request runtime permissions; the host app must handle permissions.
+ * - CXR-M v1.0.4 requires an SN authorization file (`.lc`) + developer `clientSecret` to connect.
  */
 class RokidGlassesClient(
     private val activity: AppCompatActivity,
@@ -489,6 +490,7 @@ class RokidGlassesClient(
 
     private suspend fun initBluetoothSuspend(device: BluetoothDevice): Pair<String, String> =
         suspendCoroutine { cont ->
+            val done = AtomicBoolean(false)
             CxrApi.getInstance().initBluetooth(activity, device, object : BluetoothStatusCallback {
                 override fun onConnectionInfo(
                     socketUuid: String?,
@@ -497,9 +499,13 @@ class RokidGlassesClient(
                     glassesType: Int
                 ) {
                     if (!socketUuid.isNullOrBlank() && !macAddress.isNullOrBlank()) {
-                        cont.resume(socketUuid to macAddress)
+                        if (done.compareAndSet(false, true)) {
+                            cont.resume(socketUuid to macAddress)
+                        }
                     } else {
-                        cont.resumeWithException(GlassesError.Transport("onConnectionInfo missing uuid/mac"))
+                        if (done.compareAndSet(false, true)) {
+                            cont.resumeWithException(GlassesError.Transport("onConnectionInfo missing uuid/mac"))
+                        }
                     }
                 }
 
@@ -507,14 +513,18 @@ class RokidGlassesClient(
                 override fun onDisconnected() = Unit
 
                 override fun onFailed(errorCode: ValueUtil.CxrBluetoothErrorCode?) {
-                    cont.resumeWithException(GlassesError.Transport("initBluetooth failed: $errorCode"))
+                    if (done.compareAndSet(false, true)) {
+                        cont.resumeWithException(GlassesError.Transport("initBluetooth failed: $errorCode"))
+                    }
                 }
             })
         }
 
     private suspend fun connectBluetoothSuspend(socketUuid: String, macAddress: String, useApplicationContext: Boolean) {
         suspendCoroutine<Unit> { cont ->
+            val (snLc, clientSecret) = requireAuthorization()
             val ctx = if (useApplicationContext) activity.applicationContext else activity
+            val done = AtomicBoolean(false)
             CxrApi.getInstance().connectBluetooth(ctx, socketUuid, macAddress, object : BluetoothStatusCallback {
                 override fun onConnectionInfo(
                     socketUuid: String?,
@@ -524,18 +534,40 @@ class RokidGlassesClient(
                 ) = Unit
 
                 override fun onConnected() {
-                    cont.resume(Unit)
+                    if (done.compareAndSet(false, true)) {
+                        cont.resume(Unit)
+                    }
                 }
 
                 override fun onDisconnected() {
-                    cont.resumeWithException(GlassesError.Transport("connectBluetooth disconnected"))
+                    if (done.compareAndSet(false, true)) {
+                        cont.resumeWithException(GlassesError.Transport("connectBluetooth disconnected"))
+                    }
                 }
 
                 override fun onFailed(errorCode: ValueUtil.CxrBluetoothErrorCode?) {
-                    cont.resumeWithException(GlassesError.Transport("connectBluetooth failed: $errorCode"))
+                    if (done.compareAndSet(false, true)) {
+                        cont.resumeWithException(GlassesError.Transport("connectBluetooth failed: $errorCode"))
+                    }
                 }
-            })
+            }, snLc, clientSecret)
         }
+    }
+
+    private fun requireAuthorization(): Pair<ByteArray, String> {
+        val auth = options.authorization
+            ?: throw GlassesError.Transport(
+                "Rokid authorization missing. CXR-M v1.0.4 requires SN authorization file (.lc) bytes + clientSecret. " +
+                    "Provide them via RokidGlassesClient.RokidOptions(authorization = RokidAuthorization(...))."
+            )
+        if (auth.snLc.isEmpty()) {
+            throw GlassesError.Transport("Rokid SN authorization file bytes are empty (.lc)")
+        }
+        val secret = auth.clientSecret.replace("-", "").trim()
+        if (secret.isBlank()) {
+            throw GlassesError.Transport("Rokid clientSecret is blank")
+        }
+        return auth.snLc to secret
     }
 
     private fun saveReconnectInfo(socketUuid: String, macAddress: String) {
@@ -565,6 +597,19 @@ class RokidGlassesClient(
         val defaultWidth: Int = 2400,
         val defaultHeight: Int = 1800,
         val defaultJpegQuality: Int = 90,
+        val authorization: RokidAuthorization? = null,
+    )
+
+    /**
+     * CXR-M v1.0.4 Bluetooth connect requires:
+     * - `snLc`: SN authorization file (`.lc`) bound to the device SN (downloaded from Rokid console)
+     * - `clientSecret`: developer credential (will be normalized by removing `-`)
+     *
+     * Treat both as secrets and avoid committing them into git.
+     */
+    data class RokidAuthorization(
+        val snLc: ByteArray,
+        val clientSecret: String,
     )
 
     private companion object {

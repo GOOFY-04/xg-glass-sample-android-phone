@@ -86,7 +86,7 @@ class MainActivity : AppCompatActivity() {
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
         } else {
-            listOf("ROKID", "FRAME", "RAYNEO")
+            listOf("SIMULATOR", "ROKID", "FRAME", "RAYNEO")
         }
         spDevice.adapter = ArrayAdapter(
             this,
@@ -147,7 +147,7 @@ class MainActivity : AppCompatActivity() {
                 GlassesModel.SIMULATOR -> EmulatorGlassesClient(this@MainActivity) { text ->
                     tvDisplay.text = text
                 }
-                GlassesModel.ROKID -> RokidGlassesClient(this@MainActivity)
+                GlassesModel.ROKID -> createRokidClient()
                 GlassesModel.FRAME -> {
                 // SDK-owned Flutter engine + bridge
                 EmbeddedFrameGlassesClient(this@MainActivity)
@@ -197,6 +197,52 @@ class MainActivity : AppCompatActivity() {
             appendLog("connect(${model.name}) => ${r.isSuccess} ${r.exceptionOrNull()?.message ?: ""}")
             btnConnect.isEnabled = true
         }
+    }
+
+    private fun createRokidClient(): RokidGlassesClient {
+        val secret = BuildConfig.ROKID_CLIENT_SECRET.trim()
+        val rawName = BuildConfig.ROKID_SN_RAW_NAME.trim()
+
+        val auth = loadRokidAuthorizationOrNull(
+            rawName = rawName,
+            clientSecret = secret,
+        )
+        if (auth == null) {
+            appendLog(
+                "Rokid: SN auth missing. Put your .lc under app/src/main/res/raw/ and set in local.properties:\n" +
+                    "  rokid.clientSecret=<your-client-secret>\n" +
+                    "  rokid.snRawName=<raw_resource_name_without_extension>\n" +
+                    "Or use env vars ROKID_CLIENT_SECRET / ROKID_SN_RAW_NAME."
+            )
+        }
+
+        return RokidGlassesClient(
+            this,
+            RokidGlassesClient.RokidOptions(authorization = auth),
+        )
+    }
+
+    private fun loadRokidAuthorizationOrNull(
+        rawName: String,
+        clientSecret: String,
+    ): RokidGlassesClient.RokidAuthorization? {
+        if (rawName.isBlank() || clientSecret.isBlank()) return null
+
+        // rawName is the resource entry name without extension, e.g. "sn_0a98..." for res/raw/sn_0a98....lc
+        val resId = resources.getIdentifier(rawName, "raw", packageName)
+        if (resId == 0) return null
+
+        val bytes = try {
+            resources.openRawResource(resId).use { it.readBytes() }
+        } catch (_: Exception) {
+            ByteArray(0)
+        }
+        if (bytes.isEmpty()) return null
+
+        return RokidGlassesClient.RokidAuthorization(
+            snLc = bytes,
+            clientSecret = clientSecret,
+        )
     }
 
     private fun ensurePermissionsThenConnect(model: GlassesModel) {

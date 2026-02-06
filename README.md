@@ -1,4 +1,4 @@
-<img width="632" height="533" alt="image" src="https://github.com/user-attachments/assets/b42a6755-8551-4e42-a901-aba9aa840f1c" /><h3 align="center">
+<h3 align="center">
 xg.glass
 </h3>
 
@@ -112,5 +112,3 @@ For more details, see the following documentation:
 ### Contributors (extend the SDK)
 
 If you want to **extend xg.glass itself** (new devices, new APIs, build tooling), start with [Contributor Guide](https://xg.glass/contributor-guide/).
-
-

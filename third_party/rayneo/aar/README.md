@@ -7,5 +7,3 @@ The SDK’s RayNeo Host generation plugin (`com.universalglasses.rayneo.app`) wi
 Recommended location (fixed path within the SDK):
 
 - `./third_party/rayneo/aar/`
-
-
