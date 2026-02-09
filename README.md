@@ -104,6 +104,8 @@ cd /path/to/myapp
 /path/to/xg-glass-sdk/xg-glass run
 ```
 
+The launch of Android Emulator may take serval minutes. You can keep it on to save time for the next run. 
+
 For more details, see the following documentation:
 
 - [Developer Guide](https://xg.glass/developer-guide/)
