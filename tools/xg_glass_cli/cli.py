@@ -24,6 +24,12 @@ DEFAULT_CONFIG_FILE = "xg-glass.yaml"
 # Managed Flutter SDK location
 _XG_GLASS_HOME = Path.home() / ".xg-glass"
 _MANAGED_FLUTTER_DIR = _XG_GLASS_HOME / "flutter"
+_MANAGED_JDK_DIR = _XG_GLASS_HOME / "jdk"
+
+# Highest JDK major version known to work with the project's AGP / Gradle toolchain.
+# JDK 25 (LTS, Sep 2025) is too new for AGP 8.13.1 / Gradle 8.13 and causes a bare
+# "25.0.2" build error.  Bump this constant when upgrading AGP to a version that supports it.
+_MAX_AGP_JDK_MAJOR = 21
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -198,6 +204,18 @@ def cmd_init(args: argparse.Namespace) -> int:
 
     # Generate local.properties from env if possible (do not copy template's machine-specific file).
     _write_local_properties(dst)
+    # One-click bootstrap: ensure Java/Android SDK/Flutter are usable on a fresh machine,
+    # then persist env vars for future shells (macOS: ~/.zshrc).
+    env = {**os.environ}
+    # Ensure JDK (will use system if valid, otherwise download managed).
+    _ensure_java_runtime(env)
+    # Ensure Flutter (downloads managed Flutter + runs pub get if needed).
+    cfg = _load_config(dst, DEFAULT_CONFIG_FILE)
+    _ensure_flutter_module_ready(dst, cfg)
+    # Persist for future shells
+    android_sdk = _find_android_sdk()
+    flutter = _find_flutter_cmd()
+    _persist_env(java_home=env.get("JAVA_HOME"), android_sdk=android_sdk, flutter_bin=flutter)
 
     if bool(getattr(args, "sim", False)):
         _apply_simulator_build_settings(dst, enabled=True)
@@ -205,7 +223,13 @@ def cmd_init(args: argparse.Namespace) -> int:
     print(f"Created project: {dst}")
     print("Next:")
     print(f"  cd {dst}")
-    print("  ./gradlew :app:assembleDebug")
+    print("  xg-glass build")
+    print("  # If you prefer Gradle directly in a new terminal:")
+    if platform.system() == "Darwin":
+        print("  #   source ~/.zshrc")
+    else:
+        print("  #   restart your terminal")
+    print("  #   ./gradlew :app:assembleDebug")
     print("  xg-glass install")
     print("  xg-glass run")
     return 0
@@ -225,12 +249,19 @@ def cmd_build(args: argparse.Namespace) -> int:
     _apply_cfg_to_project(project, cfg)
     _ensure_flutter_module_ready(project, cfg)
 
+    # Ensure we have a working JDK (AGP 8+ requires JDK 17).
+    env = {**os.environ}
+    _ensure_java_runtime(env)
+
+    # Gradle's Flutter plugin invokes engine binaries (impellerc, gen_snapshot).
+    # On macOS these may carry quarantine; strip before Gradle runs.
+    _ensure_flutter_executables()
 
     variant = cfg.variant
     module = cfg.module
     gradlew = _gradlew_path(project)
     task = f":{module}:assemble{_cap(variant)}"
-    _run([str(gradlew), task], cwd=project)
+    _run([str(gradlew), task], cwd=project, env=env)
     apk_dir = project / module / "build" / "outputs" / "apk" / variant
     print(f"Build OK. APK outputs under: {apk_dir}")
     return 0
@@ -484,10 +515,15 @@ def _ensure_emulator_running(serial: str | None = None) -> None:
     if not emu:
         print("  Installing emulator package...")
         env = {**os.environ, "ANDROID_HOME": sdk, "ANDROID_SDK_ROOT": sdk}
+        _ensure_java_runtime(env)
         try:
-            subprocess.run(
+            _run_quiet(
                 [str(sdkmanager), f"--sdk_root={sdk}", "emulator", "system-images;android-34;google_apis;x86_64"],
-                input="y\n" * 20, text=True, env=env, check=True, timeout=600,
+                input_text="y\n" * 20,
+                env=env,
+                check=True,
+                timeout=600,
+                verbose_env="XG_VERBOSE_SDKMANAGER",
             )
         except subprocess.CalledProcessError as exc:
             raise RuntimeError(
@@ -504,13 +540,18 @@ def _ensure_emulator_running(serial: str | None = None) -> None:
     if not avds:
         # Ensure system image is installed
         env = {**os.environ, "ANDROID_HOME": sdk, "ANDROID_SDK_ROOT": sdk}
+        _ensure_java_runtime(env)
         sys_img = Path(sdk) / "system-images" / "android-34" / "google_apis" / "x86_64"
         if not sys_img.is_dir():
             print("  Installing system image...")
             try:
-                subprocess.run(
+                _run_quiet(
                     [str(sdkmanager), f"--sdk_root={sdk}", "system-images;android-34;google_apis;x86_64"],
-                    input="y\n" * 20, text=True, env=env, check=True, timeout=600,
+                    input_text="y\n" * 20,
+                    env=env,
+                    check=True,
+                    timeout=600,
+                    verbose_env="XG_VERBOSE_SDKMANAGER",
                 )
             except subprocess.CalledProcessError:
                 pass
@@ -815,6 +856,12 @@ def _ensure_flutter_module_ready(project: Path, cfg: XgConfig) -> None:
 
     _run([flutter, "pub", "get"], cwd=fm)
 
+    # flutter pub get downloads engine artifacts (impellerc, gen_snapshot, …)
+    # into bin/cache/artifacts/.  On macOS these new files inherit the
+    # com.apple.quarantine xattr and must be cleaned before Gradle can invoke them.
+    if platform.system() != "Windows" and str(flutter).startswith(str(_MANAGED_FLUTTER_DIR)):
+        _ensure_flutter_executables()
+
     if not pkg_config.exists():
         raise RuntimeError(
             "flutter pub get did not produce .dart_tool/package_config.json.\n"
@@ -839,6 +886,75 @@ def _managed_flutter_bin() -> Path:
     return _MANAGED_FLUTTER_DIR / "flutter" / "bin" / name
 
 
+def _ensure_flutter_executables() -> None:
+    """
+    Ensure the managed Flutter SDK is actually executable on macOS/Linux.
+
+    Two separate issues are fixed:
+
+    1. **Missing +x bits** – Python's ``zipfile.extractall()`` may drop POSIX
+       execute bits, so we explicitly ``chmod +x`` key entrypoints.
+
+    2. **macOS quarantine** – files downloaded from the internet (both the initial
+       zip *and* artifacts that ``flutter pub get`` fetches later) carry the
+       ``com.apple.quarantine`` extended attribute.  macOS Gatekeeper blocks
+       execution of unsigned binaries that have this xattr, even when ``+x`` is
+       set.  We strip quarantine from the **entire** managed Flutter tree so that
+       ``dart``, ``flutter``, and engine binaries like ``impellerc`` can all run.
+
+    This function is safe to call repeatedly (idempotent).
+    """
+    if platform.system() == "Windows":
+        return
+    root = _MANAGED_FLUTTER_DIR / "flutter"
+    if not root.is_dir():
+        return
+
+    # ── macOS: remove quarantine xattr ──────────────────────────────────
+    # We target the entire managed Flutter root so that engine artifacts
+    # downloaded by `flutter pub get` (e.g. bin/cache/artifacts/engine/
+    # darwin-x64/impellerc) are also cleaned.  `xattr -cr` only touches
+    # metadata, so it is fast even for large trees.
+    if platform.system() == "Darwin":
+        try:
+            subprocess.run(
+                ["xattr", "-cr", str(root)],
+                capture_output=True,
+                timeout=300,
+            )
+        except Exception:
+            pass
+
+    # ── Ensure +x on core entrypoints ───────────────────────────────────
+    for p in [
+        root / "bin" / "flutter",
+        root / "bin" / "dart",
+        root / "bin" / "internal" / "update_engine_version.sh",
+        root / "bin" / "internal" / "shared.sh",
+    ]:
+        _ensure_executable(p)
+
+    # All .sh scripts under bin/internal/
+    internal = root / "bin" / "internal"
+    if internal.is_dir():
+        for p in internal.glob("*.sh"):
+            _ensure_executable(p)
+
+    # Dart SDK binaries in cache (pre-packaged or downloaded on first run).
+    dart_bin = root / "bin" / "cache" / "dart-sdk" / "bin"
+    if dart_bin.is_dir():
+        for p in dart_bin.iterdir():
+            if p.is_file():
+                _ensure_executable(p)
+
+    # Engine artifacts downloaded by flutter (impellerc, gen_snapshot, etc.).
+    artifacts = root / "bin" / "cache" / "artifacts" / "engine"
+    if artifacts.is_dir():
+        for p in artifacts.rglob("*"):
+            if p.is_file() and not p.suffix:
+                _ensure_executable(p)
+
+
 def _download_progress(block_num: int, block_size: int, total_size: int) -> None:
     """Report download progress to stdout."""
     if total_size > 0:
@@ -848,6 +964,266 @@ def _download_progress(block_num: int, block_size: int, total_size: int) -> None
         mb_total = total_size / (1024 * 1024)
         sys.stdout.write(f"\r  Progress: {pct}% ({mb_done:.1f} / {mb_total:.1f} MB)")
         sys.stdout.flush()
+
+
+def _http_user_agent() -> str:
+    # Some CDNs/WAFs return 403 for default Python urllib UA; use a browser-like UA.
+    return "Mozilla/5.0 (xg-glass-cli) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+
+
+def _download_file(url: str, dest: Path) -> None:
+    """
+    Download a URL to a file with a custom User-Agent and progress output.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": _http_user_agent(), "Accept": "*/*"})
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        total = resp.headers.get("Content-Length")
+        try:
+            total_size = int(total) if total else 0
+        except Exception:
+            total_size = 0
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        downloaded = 0
+        with open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(256 * 1024)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if total_size > 0:
+                    pct = min(100, downloaded * 100 // total_size)
+                    mb_done = downloaded / (1024 * 1024)
+                    mb_total = total_size / (1024 * 1024)
+                    sys.stdout.write(f"\r  Progress: {pct}% ({mb_done:.1f} / {mb_total:.1f} MB)")
+                    sys.stdout.flush()
+
+
+def _download_json(url: str) -> object:
+    req = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": _http_user_agent(),
+            "Accept": "application/json,text/plain,*/*",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def _is_truthy_env(name: str) -> bool:
+    return os.environ.get(name, "").strip() not in ("", "0", "false", "False", "no", "No")
+
+
+def _persist_env_enabled() -> bool:
+    """
+    Whether `xg-glass init` should persist env vars for future shells.
+    Opt out via: XG_NO_PERSIST_ENV=1
+    """
+    return not _is_truthy_env("XG_NO_PERSIST_ENV")
+
+
+def _homeify(path: str) -> str:
+    """
+    Replace the current user's home directory with $HOME for portability in shell profiles.
+    """
+    try:
+        home = str(Path.home())
+        return path.replace(home, "$HOME")
+    except Exception:
+        return path
+
+
+def _upsert_profile_block(profile: Path, *, block_id: str, body: str) -> bool:
+    """
+    Idempotently upsert a marked block into a profile file. Returns True if modified.
+    """
+    start = f"# >>> xg-glass {block_id} >>>"
+    end = f"# <<< xg-glass {block_id} <<<"
+    new_block = "\n".join([start, body.rstrip(), end, ""])
+    existing = ""
+    if profile.exists():
+        try:
+            existing = profile.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            existing = ""
+    if start in existing and end in existing:
+        pre, rest = existing.split(start, 1)
+        _, post = rest.split(end, 1)
+        updated = pre.rstrip("\n") + "\n\n" + new_block + post.lstrip("\n")
+    else:
+        sep = "\n" if existing.endswith("\n") or existing == "" else "\n\n"
+        updated = existing + sep + new_block
+    if updated == existing:
+        return False
+    profile.parent.mkdir(parents=True, exist_ok=True)
+    profile.write_text(updated, encoding="utf-8")
+    return True
+
+
+def _persist_env_macos_zshrc(*, java_home: str | None, android_sdk: str | None, flutter_bin: str | None) -> None:
+    """
+    Persist env vars into ~/.zshrc (macOS target per product requirement).
+    """
+    if not _persist_env_enabled():
+        return
+    zshrc = Path.home() / ".zshrc"
+    force = "${XG_FORCE_ENV:-}"  # evaluated in shell
+
+    managed_java = _homeify(java_home) if java_home else ""
+    managed_android = _homeify(android_sdk) if android_sdk else ""
+    flutter_dir = _homeify(str(Path(flutter_bin).parent)) if flutter_bin else ""
+
+    lines: list[str] = [
+        "# xg-glass: one-click environment bootstrap (Java/Android SDK/Flutter)",
+        "# - This block is managed by `xg-glass init`.",
+        "# - It does NOT override valid user settings by default.",
+        "# - Set XG_FORCE_ENV=1 to force using xg-glass managed paths.",
+        "",
+        "xg_glass_prepend_path() {",
+        '  case ":$PATH:" in',
+        '    *":$1:"*) ;;',
+        '    *) PATH="$1:$PATH" ;;',
+        "  esac",
+        "}",
+        "",
+    ]
+
+    if managed_java:
+        lines += [
+            "# Java",
+            f'if [[ "{force}" == "1" ]]; then',
+            f'  export JAVA_HOME="{managed_java}"',
+            'elif [[ -z "${JAVA_HOME:-}" || ! -x "${JAVA_HOME}/bin/java" ]]; then',
+            f'  export JAVA_HOME="{managed_java}"',
+            "fi",
+            'if [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/java" ]]; then',
+            '  xg_glass_prepend_path "${JAVA_HOME}/bin"',
+            "fi",
+            "",
+        ]
+
+    if managed_android:
+        lines += [
+            "# Android SDK",
+            f'if [[ "{force}" == "1" ]]; then',
+            f'  export ANDROID_SDK_ROOT="{managed_android}"',
+            f'  export ANDROID_HOME="{managed_android}"',
+            'elif [[ -z "${ANDROID_SDK_ROOT:-}" || ! -d "${ANDROID_SDK_ROOT}/platform-tools" ]]; then',
+            f'  export ANDROID_SDK_ROOT="{managed_android}"',
+            f'  export ANDROID_HOME="{managed_android}"',
+            "fi",
+            'if [[ -n "${ANDROID_SDK_ROOT:-}" && -d "${ANDROID_SDK_ROOT}/platform-tools" ]]; then',
+            '  xg_glass_prepend_path "${ANDROID_SDK_ROOT}/platform-tools"',
+            "fi",
+            "",
+        ]
+
+    if flutter_dir:
+        lines += [
+            "# Flutter",
+            f'if [[ "{force}" == "1" || -z "$(command -v flutter 2>/dev/null)" ]]; then',
+            f'  xg_glass_prepend_path "{flutter_dir}"',
+            "fi",
+            "",
+        ]
+
+    modified = _upsert_profile_block(zshrc, block_id="env", body="\n".join(lines))
+    if modified:
+        print(f"  Updated shell profile: {zshrc}")
+        print(f"  Restart your terminal (or run `source {zshrc}`) to apply.")
+
+
+def _persist_env_windows(*, java_home: str | None, android_sdk: str | None, flutter_bin: str | None) -> None:
+    """
+    Persist user env vars on Windows (takes effect in new terminals).
+    """
+    if not _persist_env_enabled():
+        return
+    if platform.system() != "Windows":
+        return
+    java_home = java_home or ""
+    android_sdk = android_sdk or ""
+    flutter_dir = str(Path(flutter_bin).parent) if flutter_bin else ""
+
+    ps = r"""
+$ErrorActionPreference = "Stop"
+$force = ($env:XG_FORCE_ENV -eq "1")
+function Set-UserEnvIfMissing([string]$name, [string]$value) {
+  if ([string]::IsNullOrEmpty($value)) { return }
+  $cur = [Environment]::GetEnvironmentVariable($name, "User")
+  if ($force -or [string]::IsNullOrEmpty($cur) -or (-not (Test-Path $cur))) {
+    [Environment]::SetEnvironmentVariable($name, $value, "User")
+  }
+}
+function Prepend-UserPathIfMissing([string]$dir) {
+  if ([string]::IsNullOrEmpty($dir)) { return }
+  $path = [Environment]::GetEnvironmentVariable("Path", "User")
+  if ([string]::IsNullOrEmpty($path)) { $path = "" }
+  $parts = $path -split ';' | Where-Object { $_ -ne "" }
+  if ($parts -notcontains $dir) {
+    [Environment]::SetEnvironmentVariable("Path", ($dir + ";" + $path), "User")
+  }
+}
+"""
+    if android_sdk:
+        ps += f'Set-UserEnvIfMissing "ANDROID_SDK_ROOT" "{android_sdk}"\n'
+        ps += f'Set-UserEnvIfMissing "ANDROID_HOME" "{android_sdk}"\n'
+        ps += 'Prepend-UserPathIfMissing (Join-Path $env:ANDROID_SDK_ROOT "platform-tools")\n'
+    if java_home:
+        ps += f'Set-UserEnvIfMissing "JAVA_HOME" "{java_home}"\n'
+        ps += 'Prepend-UserPathIfMissing (Join-Path $env:JAVA_HOME "bin")\n'
+    if flutter_dir:
+        ps += f'Prepend-UserPathIfMissing "{flutter_dir}"\n'
+    ps += 'Write-Host "Updated user environment variables. Restart your terminal to apply."\n'
+    subprocess.run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], check=False)
+
+
+def _persist_env(*, java_home: str | None = None, android_sdk: str | None = None, flutter_bin: str | None = None) -> None:
+    if not _persist_env_enabled():
+        return
+    sysname = platform.system()
+    if sysname == "Windows":
+        _persist_env_windows(java_home=java_home, android_sdk=android_sdk, flutter_bin=flutter_bin)
+    elif sysname == "Darwin":
+        _persist_env_macos_zshrc(java_home=java_home, android_sdk=android_sdk, flutter_bin=flutter_bin)
+
+def _run_quiet(
+    cmd: list[str],
+    *,
+    env: dict[str, str],
+    timeout: int | None = None,
+    input_text: str | None = None,
+    check: bool = True,
+    verbose_env: str = "XG_VERBOSE",
+) -> subprocess.CompletedProcess[str]:
+    """
+    Run a command. By default, suppress stdout/stderr to avoid extremely noisy tools.
+    Set the env var in `verbose_env` (e.g. XG_VERBOSE_SDKMANAGER=1) to stream output.
+    """
+    if _is_truthy_env(verbose_env):
+        return subprocess.run(
+            cmd,
+            input=input_text,
+            text=True,
+            env=env,
+            check=check,
+            timeout=timeout,
+        )
+    p = subprocess.run(
+        cmd,
+        input=input_text,
+        text=True,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+        timeout=timeout,
+    )
+    if check and p.returncode != 0:
+        tail = (p.stdout or "")[-8000:]
+        raise subprocess.CalledProcessError(p.returncode, cmd, output=tail)
+    return p
 
 
 def _auto_download_flutter() -> str:
@@ -932,6 +1308,8 @@ def _auto_download_flutter() -> str:
     finally:
         archive_path.unlink(missing_ok=True)
 
+    _ensure_flutter_executables()
+
     flutter_bin = _managed_flutter_bin()
     if not flutter_bin.exists():
         raise RuntimeError(
@@ -955,6 +1333,7 @@ def _find_flutter_cmd() -> str | None:
     # Check managed installation
     managed = _managed_flutter_bin()
     if managed.exists():
+        _ensure_flutter_executables()
         return str(managed)
     return None
 
@@ -993,6 +1372,352 @@ def _ensure_executable(path: Path) -> None:
         return
     mode = path.stat().st_mode
     path.chmod(mode | 0o111)
+
+
+def _maybe_infer_java_home(env: dict[str, str]) -> dict[str, str]:
+    """
+    Best-effort: infer JAVA_HOME if it's missing.
+
+    This is mainly helpful on macOS where users may have a JDK installed but
+    haven't exported JAVA_HOME in their shell.
+    """
+    if env.get("JAVA_HOME"):
+        return env
+    if platform.system() != "Darwin":
+        return env
+    java_home = "/usr/libexec/java_home"
+    if not Path(java_home).exists():
+        return env
+    # Prefer JDK 17 (Android baseline), fall back to default.
+    for args in ([java_home, "-v", "17"], [java_home]):
+        try:
+            p = subprocess.run(args, capture_output=True, text=True)
+        except Exception:
+            continue
+        if p.returncode == 0:
+            candidate = (p.stdout or "").strip()
+            if candidate and Path(candidate).exists():
+                env["JAVA_HOME"] = candidate
+                return env
+    return env
+
+
+def _java_exe_name() -> str:
+    return "java.exe" if platform.system() == "Windows" else "java"
+
+
+def _java_cmd(env: dict[str, str]) -> str:
+    """
+    Prefer JAVA_HOME/bin/java when JAVA_HOME is set; otherwise fall back to `java` on PATH.
+    """
+    home = env.get("JAVA_HOME")
+    if home:
+        exe = Path(home) / "bin" / _java_exe_name()
+        if exe.exists():
+            return str(exe)
+    return "java"
+
+
+def _parse_java_major(java_version_output: str) -> int | None:
+    """
+    Parse Java major version from `java -version` output.
+
+    Examples:
+      - 'openjdk version "17.0.10" ...' -> 17
+      - 'java version "1.8.0_321"' -> 8
+    """
+    m = re.search(r'version\s+"([^"]+)"', java_version_output)
+    if not m:
+        return None
+    v = m.group(1).strip()
+    if v.startswith("1."):
+        parts = v.split(".")
+        if len(parts) >= 2 and parts[1].isdigit():
+            return int(parts[1])
+        return None
+    head = v.split(".", 1)[0]
+    return int(head) if head.isdigit() else None
+
+
+def _find_managed_java_home() -> str | None:
+    """
+    Find a previously downloaded managed JDK under ~/.xg-glass/jdk/.
+    Returns JAVA_HOME path if found.
+    """
+    if not _MANAGED_JDK_DIR.is_dir():
+        return None
+    exe = _java_exe_name()
+    try:
+        children = [p for p in _MANAGED_JDK_DIR.iterdir() if p.is_dir()]
+    except Exception:
+        return None
+    for child in sorted(children, key=lambda p: p.name):
+        # Common layouts:
+        # - <dir>/bin/java
+        # - mac: <dir>/Contents/Home/bin/java (when extracting a .jdk bundle)
+        for home in (child, child / "Contents" / "Home"):
+            if (home / "bin" / exe).exists():
+                return str(home)
+    # Fallback: search deeper (handles nested top-level folder layouts).
+    for child in children:
+        try:
+            for p in child.rglob(exe):
+                if p.name == exe and p.parent.name == "bin":
+                    return str(p.parent.parent)
+        except Exception:
+            continue
+    return None
+
+
+def _default_managed_jdk_major() -> int:
+    """
+    Pick the default managed JDK major version to download.
+
+    - Must be >=17 (Android/AGP baseline).
+    - Capped at _MAX_AGP_JDK_MAJOR (currently 21) because the project's AGP/Gradle
+      toolchain may not yet support newer JDKs (e.g. JDK 25 causes "25.0.2" build errors).
+    - Override via env var: XG_JAVA_MAJOR=17|21|25|...  (the cap is skipped when overriding)
+    """
+    raw = os.environ.get("XG_JAVA_MAJOR", "").strip()
+    if raw:
+        # Explicit override: trust the user, no upper cap.
+        try:
+            v = int(raw)
+            return v if v >= 17 else 17
+        except Exception:
+            return 17
+
+    # Upper bound: highest JDK major known to work with current AGP / Gradle.
+    # Bump this when libs.versions.toml upgrades AGP to a version that supports newer JDKs.
+    max_jdk = _MAX_AGP_JDK_MAJOR
+
+    try:
+        data = _download_json("https://api.adoptium.net/v3/info/available_releases")
+        if isinstance(data, dict):
+            lts = data.get("available_lts_releases")
+            if isinstance(lts, list):
+                lts_int = [
+                    int(x) for x in lts
+                    if isinstance(x, int) or (isinstance(x, str) and str(x).isdigit())
+                ]
+                # Pick the highest LTS that is within [17, max_jdk].
+                valid = [x for x in lts_int if 17 <= x <= max_jdk]
+                if valid:
+                    return max(valid)
+            # Fallback: most_recent_lts (capped).
+            mr = data.get("most_recent_lts")
+            if isinstance(mr, int) and 17 <= mr <= max_jdk:
+                return mr
+    except Exception:
+        pass
+    return 21  # safe default: JDK 21 (LTS, well-supported by AGP 8.x)
+
+
+def _auto_download_jdk(major: int) -> str:
+    """
+    Download and extract a managed JDK into ~/.xg-glass/jdk/.
+    Returns JAVA_HOME.
+    """
+    major = max(17, int(major))
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+    os_name = {"darwin": "mac", "windows": "windows"}.get(system, "linux")
+    arch = "aarch64" if machine in ("arm64", "aarch64") else "x64"
+    prefer_ext = ".zip" if os_name == "windows" else ".tar.gz"
+
+    print(f"Java (JDK {major}) not found. Downloading a managed JDK for xg-glass...")
+    print(f"  Install location: {_MANAGED_JDK_DIR}")
+
+    _MANAGED_JDK_DIR.mkdir(parents=True, exist_ok=True)
+
+    link: str | None = None
+    name: str | None = None
+
+    # Allow explicit override for air-gapped / mirrored environments.
+    override_url = os.environ.get("XG_JDK_URL", "").strip()
+    if override_url:
+        link = override_url
+        name = override_url.rsplit("/", 1)[-1] or "jdk17"
+    else:
+        # Try to fetch a package link (more stable naming) via the assets API.
+        assets_url = (
+            f"https://api.adoptium.net/v3/assets/latest/{major}/hotspot"
+            f"?os={os_name}&architecture={arch}&image_type=jdk"
+        )
+        try:
+            data = _download_json(assets_url)
+            if isinstance(data, dict):
+                data = [data]
+            candidates: list[tuple[str, str]] = []
+            for item in data:
+                bins = item.get("binaries") or []
+                if not bins and item.get("binary"):
+                    bins = [item.get("binary")]
+                for b in bins or []:
+                    pkg = (b or {}).get("package") or {}
+                    lnk = pkg.get("link")
+                    nm = pkg.get("name") or ""
+                    if lnk:
+                        candidates.append((lnk, nm))
+            if candidates:
+                # Prefer expected extension for the platform.
+                for lnk, nm in candidates:
+                    if nm.endswith(prefer_ext):
+                        link, name = lnk, nm
+                        break
+                if not link:
+                    link, name = candidates[0]
+        except Exception:
+            link = None
+
+    # Fallback: direct binary endpoint.
+    if not link:
+        link = f"https://api.adoptium.net/v3/binary/latest/{major}/ga/{os_name}/{arch}/jdk/hotspot/normal/eclipse"
+        name = f"temurin-jdk{major}-{os_name}-{arch}{prefer_ext}"
+
+    archive_path = _MANAGED_JDK_DIR / (name or "temurin-jdk17")
+    print(f"  Downloading from: {link}")
+    try:
+        # Support local path override (air-gapped env), e.g. XG_JDK_URL=/tmp/jdk.tar.gz
+        if "://" not in link:
+            local = Path(link).expanduser()
+            if local.exists() and local.is_file():
+                shutil.copy2(local, archive_path)
+            else:
+                _download_file(link, archive_path)
+        else:
+            _download_file(link, archive_path)
+        print()  # newline after progress
+    except (urllib.error.HTTPError, urllib.error.URLError, OSError) as exc:
+        archive_path.unlink(missing_ok=True)
+        hint = ""
+        if isinstance(exc, urllib.error.HTTPError) and getattr(exc, "code", None) == 403:
+            hint = (
+                "\nHint: HTTP 403 usually means the download host is blocked by your network/WAF.\n"
+                "      You can set a proxy (HTTPS_PROXY/HTTP_PROXY) or provide a mirror URL via XG_JDK_URL.\n"
+            )
+        raise RuntimeError(
+            f"Failed to download JDK {major}: {exc}{hint}\n"
+            "Please install JDK 17+ manually.\n"
+            "macOS: brew install --cask temurin@17\n"
+            "Windows (PowerShell): winget install EclipseAdoptium.Temurin.17.JDK"
+        ) from exc
+
+    # Extract to a temp dir, then move into place.
+    tmp_extract = _MANAGED_JDK_DIR / "_jdk_extract_tmp"
+    if tmp_extract.exists():
+        shutil.rmtree(tmp_extract, ignore_errors=True)
+    tmp_extract.mkdir(parents=True, exist_ok=True)
+
+    print("  Extracting...")
+    try:
+        n = archive_path.name.lower()
+        if n.endswith(".zip"):
+            with zipfile.ZipFile(str(archive_path), "r") as zf:
+                zf.extractall(str(tmp_extract))
+        elif n.endswith((".tar.gz", ".tgz", ".tar.xz", ".tar")):
+            with tarfile.open(str(archive_path), "r:*") as tf:
+                if sys.version_info >= (3, 12):
+                    tf.extractall(str(tmp_extract), filter="fully_trusted")
+                else:
+                    tf.extractall(str(tmp_extract))
+        else:
+            raise RuntimeError(f"Unknown JDK archive format: {archive_path.name}")
+    finally:
+        archive_path.unlink(missing_ok=True)
+
+    # Pick a single top-level directory if present; otherwise search under tmp_extract.
+    top_dirs = [p for p in tmp_extract.iterdir() if p.is_dir()]
+    install_dir = top_dirs[0] if len(top_dirs) == 1 else tmp_extract
+
+    # Clear existing managed JDKs (keep it simple: one managed install).
+    for p in _MANAGED_JDK_DIR.iterdir():
+        if p.name.startswith("_"):
+            continue
+        if p.is_dir():
+            shutil.rmtree(p, ignore_errors=True)
+        else:
+            p.unlink(missing_ok=True)
+
+    final_dir = _MANAGED_JDK_DIR / (install_dir.name if install_dir != tmp_extract else "jdk17")
+    if final_dir.exists():
+        shutil.rmtree(final_dir, ignore_errors=True)
+    shutil.move(str(install_dir), str(final_dir))
+    shutil.rmtree(tmp_extract, ignore_errors=True)
+
+    # Detect JAVA_HOME inside final_dir.
+    exe = _java_exe_name()
+    for home in (final_dir, final_dir / "Contents" / "Home"):
+        if (home / "bin" / exe).exists():
+            print(f"  JDK installed successfully: {home}")
+            return str(home)
+    # Fallback search:
+    for p in final_dir.rglob(exe):
+        if p.name == exe and p.parent.name == "bin":
+            home = p.parent.parent
+            print(f"  JDK installed successfully: {home}")
+            return str(home)
+    raise RuntimeError(
+        f"JDK extracted but java executable not found under: {final_dir}\n"
+        "Please install JDK 17+ manually."
+    )
+
+
+def _ensure_java_runtime(env: dict[str, str]) -> None:
+    """
+    Ensure Java runtime is available for Android SDK tools (sdkmanager/avdmanager).
+
+    On macOS, `/usr/bin/java` can exist but still fail with:
+      "Unable to locate a Java Runtime."
+    """
+    env = _maybe_infer_java_home(env)
+
+    def check() -> tuple[bool, str, int | None]:
+        cmd = _java_cmd(env)
+        try:
+            p = subprocess.run([cmd, "-version"], capture_output=True, text=True, env=env)
+        except FileNotFoundError:
+            return False, "java executable not found", None
+        out = ((p.stdout or "") + "\n" + (p.stderr or "")).strip()
+        major = _parse_java_major(out)
+        ok = p.returncode == 0 and (major is None or major >= 17)
+        return ok, out, major
+
+    ok, out, major = check()
+    if ok:
+        return
+
+    # If Java exists but is too old (<17), or Java is missing/broken, try managed JDK (opt-out supported).
+    if os.environ.get("XG_NO_JAVA_DOWNLOAD", "").strip() not in ("", "0"):
+        if major is not None and major < 17:
+            raise RuntimeError(
+                f"Java {major} detected, but JDK 17+ is required.\n"
+                "Please install JDK 17+ and ensure `java -version` works.\n"
+                "macOS: brew install --cask temurin@17 && export JAVA_HOME=$(/usr/libexec/java_home -v 17)\n"
+                "Windows (PowerShell): winget install EclipseAdoptium.Temurin.17.JDK"
+            )
+        raise RuntimeError(
+            "Java runtime is not available, and auto-download is disabled (XG_NO_JAVA_DOWNLOAD=1).\n"
+            "Please install JDK 17+ and ensure `java -version` works.\n"
+            "macOS: brew install --cask temurin@17 && export JAVA_HOME=$(/usr/libexec/java_home -v 17)\n"
+            "Windows (PowerShell): winget install EclipseAdoptium.Temurin.17.JDK\n"
+            f"`java -version` output:\n{out}"
+        )
+
+    managed = _find_managed_java_home()
+    if not managed:
+        managed = _auto_download_jdk(_default_managed_jdk_major())
+    env["JAVA_HOME"] = managed
+    env["PATH"] = str(Path(managed) / "bin") + os.pathsep + env.get("PATH", "")
+
+    ok2, out2, major2 = check()
+    if ok2:
+        return
+    raise RuntimeError(
+        "Java runtime is still not available after setting up a managed JDK.\n"
+        "Please install JDK 17+ manually and ensure `java -version` works.\n"
+        f"`java -version` output:\n{out2}"
+    )
 
 
 # Default Android SDK packages required for building.
@@ -1107,30 +1832,31 @@ def _auto_download_android_sdk() -> str:
     # Accept licenses and install required packages.
     sdk_root = str(_MANAGED_ANDROID_SDK_DIR)
     env = {**os.environ, "ANDROID_HOME": sdk_root, "ANDROID_SDK_ROOT": sdk_root}
+    _ensure_java_runtime(env)
 
     print("  Accepting licenses...")
     try:
         # Pipe "y" answers to accept all licenses.
-        proc = subprocess.run(
+        _run_quiet(
             [str(sdkmanager), f"--sdk_root={sdk_root}", "--licenses"],
-            input="y\n" * 20,
-            capture_output=True,
-            text=True,
             env=env,
             timeout=120,
+            input_text="y\n" * 20,
+            check=False,
+            verbose_env="XG_VERBOSE_SDKMANAGER",
         )
     except Exception:
         pass  # best-effort – install will also prompt
 
     print(f"  Installing SDK packages: {', '.join(_ANDROID_SDK_PACKAGES)}")
     try:
-        subprocess.run(
+        _run_quiet(
             [str(sdkmanager), f"--sdk_root={sdk_root}"] + _ANDROID_SDK_PACKAGES,
-            input="y\n" * 20,
-            text=True,
             env=env,
             check=True,
             timeout=600,
+            input_text="y\n" * 20,
+            verbose_env="XG_VERBOSE_SDKMANAGER",
         )
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(
@@ -1228,9 +1954,9 @@ def _cap(s: str) -> str:
     return s[0].upper() + s[1:]
 
 
-def _run(cmd: list[str], cwd: Path) -> None:
+def _run(cmd: list[str], cwd: Path, *, env: dict[str, str] | None = None) -> None:
     print("+", " ".join(cmd))
-    subprocess.check_call(cmd, cwd=str(cwd))
+    subprocess.check_call(cmd, cwd=str(cwd), env=env)
 
 
 def _infer_entry_class_from_kt(path: Path) -> str | None:
