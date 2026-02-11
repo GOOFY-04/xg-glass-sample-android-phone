@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tarfile
 import tempfile
+import time
 import urllib.error
 import urllib.request
 import zipfile
@@ -202,18 +203,20 @@ def cmd_init(args: argparse.Namespace) -> int:
             encoding="utf-8",
         )
 
-    # Generate local.properties from env if possible (do not copy template's machine-specific file).
-    _write_local_properties(dst)
     # One-click bootstrap: ensure Java/Android SDK/Flutter are usable on a fresh machine,
     # then persist env vars for future shells (macOS: ~/.zshrc).
     env = {**os.environ}
-    # Ensure JDK (will use system if valid, otherwise download managed).
     _ensure_java_runtime(env)
+    android_sdk = _resolve_android_sdk()
+    if android_sdk:
+        env.setdefault("ANDROID_HOME", android_sdk)
+        env.setdefault("ANDROID_SDK_ROOT", android_sdk)
+    # Generate local.properties with sdk.dir + Rokid config.
+    _write_local_properties(dst, android_sdk)
     # Ensure Flutter (downloads managed Flutter + runs pub get if needed).
     cfg = _load_config(dst, DEFAULT_CONFIG_FILE)
     _ensure_flutter_module_ready(dst, cfg)
     # Persist for future shells
-    android_sdk = _find_android_sdk()
     flutter = _find_flutter_cmd()
     _persist_env(java_home=env.get("JAVA_HOME"), android_sdk=android_sdk, flutter_bin=flutter)
 
@@ -247,11 +250,24 @@ def cmd_build(args: argparse.Namespace) -> int:
         module=args.module,
     )
     _apply_cfg_to_project(project, cfg)
-    _ensure_flutter_module_ready(project, cfg)
 
-    # Ensure we have a working JDK (AGP 8+ requires JDK 17).
+    # Ensure all development dependencies are available.
+    # This allows standalone `xg-glass build` (without prior `init`) on a fresh machine.
     env = {**os.environ}
     _ensure_java_runtime(env)
+    android_sdk = _resolve_android_sdk()
+    if android_sdk:
+        env.setdefault("ANDROID_HOME", android_sdk)
+        env.setdefault("ANDROID_SDK_ROOT", android_sdk)
+        # Ensure project local.properties has sdk.dir (may be missing if user
+        # cloned the project instead of using `xg-glass init`).
+        _ensure_project_sdk_dir(project, android_sdk)
+    _ensure_flutter_module_ready(project, cfg)
+
+    # Persist env vars so future shells (e.g. manual ./gradlew) also work.
+    # Idempotent – no-op if already written.
+    flutter = _find_flutter_cmd()
+    _persist_env(java_home=env.get("JAVA_HOME"), android_sdk=android_sdk, flutter_bin=flutter)
 
     # Gradle's Flutter plugin invokes engine binaries (impellerc, gen_snapshot).
     # On macOS these may carry quarantine; strip before Gradle runs.
@@ -591,7 +607,6 @@ def _ensure_emulator_running(serial: str | None = None) -> None:
     )
 
     # Wait for device to come online and finish booting.
-    import time
     adb = _find_adb_cmd()
     print("  Waiting for emulator to boot", end="", flush=True)
     deadline = time.monotonic() + 180  # 3 minute timeout
@@ -682,18 +697,6 @@ def _apply_simulator_build_settings(project: Path, *, enabled: bool) -> None:
     s = s2
 
     app_gradle.write_text(s, encoding="utf-8")
-
-
-def _replace_include_build(settings_text: str, path_regex: str, new_rel_path: str) -> str:
-    # Replace includeBuild("...") occurrences matching path_regex.
-    def repl(m: re.Match[str]) -> str:
-        return f'includeBuild("{new_rel_path}")'
-
-    return re.sub(
-        rf'includeBuild\("({path_regex})"\)',
-        repl,
-        settings_text,
-    )
 
 
 @dataclass(frozen=True)
@@ -795,11 +798,6 @@ def _apply_cfg_to_project(project: Path, cfg: XgConfig) -> None:
                 flags=re.MULTILINE,
             )
             settings_file.write_text(s, encoding="utf-8")
-
-
-def _maybe_clean_flutter_caches(project: Path, cfg: XgConfig) -> None:
-    # Backward-compatible shim; keep for old callers (now replaced by _ensure_flutter_module_ready).
-    _ensure_flutter_module_ready(project, cfg)
 
 
 def _ensure_flutter_module_ready(project: Path, cfg: XgConfig) -> None:
@@ -953,17 +951,6 @@ def _ensure_flutter_executables() -> None:
                 _ensure_executable(p)
 
 
-def _download_progress(block_num: int, block_size: int, total_size: int) -> None:
-    """Report download progress to stdout."""
-    if total_size > 0:
-        downloaded = block_num * block_size
-        pct = min(100, downloaded * 100 // total_size)
-        mb_done = downloaded / (1024 * 1024)
-        mb_total = total_size / (1024 * 1024)
-        sys.stdout.write(f"\r  Progress: {pct}% ({mb_done:.1f} / {mb_total:.1f} MB)")
-        sys.stdout.flush()
-
-
 def _http_user_agent() -> str:
     # Some CDNs/WAFs return 403 for default Python urllib UA; use a browser-like UA.
     return "Mozilla/5.0 (xg-glass-cli) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
@@ -1007,6 +994,22 @@ def _download_json(url: str) -> object:
     )
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.loads(resp.read())
+
+
+def _extract_archive(archive: Path, dest: Path) -> None:
+    """Extract a zip / tar.gz / tar.xz archive into *dest*."""
+    name = archive.name.lower()
+    if name.endswith(".zip"):
+        with zipfile.ZipFile(str(archive), "r") as zf:
+            zf.extractall(str(dest))
+    elif name.endswith((".tar.gz", ".tgz", ".tar.xz", ".tar")):
+        with tarfile.open(str(archive), "r:*") as tf:
+            if sys.version_info >= (3, 12):
+                tf.extractall(str(dest), filter="fully_trusted")
+            else:
+                tf.extractall(str(dest))
+    else:
+        raise RuntimeError(f"Unknown archive format: {archive.name}")
 
 
 def _is_truthy_env(name: str) -> bool:
@@ -1244,8 +1247,7 @@ def _auto_download_flutter() -> str:
         f"releases_{os_name}.json"
     )
     try:
-        with urllib.request.urlopen(releases_url, timeout=30) as resp:
-            data = json.loads(resp.read())
+        data = _download_json(releases_url)
     except (urllib.error.URLError, OSError) as exc:
         raise RuntimeError(
             f"Failed to fetch Flutter release information: {exc}\n"
@@ -1281,7 +1283,7 @@ def _auto_download_flutter() -> str:
     print(f"  Downloading from: {archive_url}")
 
     try:
-        urllib.request.urlretrieve(archive_url, str(archive_path), _download_progress)
+        _download_file(archive_url, archive_path)
         print()  # newline after progress bar
     except (urllib.error.URLError, OSError) as exc:
         archive_path.unlink(missing_ok=True)
@@ -1292,17 +1294,7 @@ def _auto_download_flutter() -> str:
 
     print("  Extracting...")
     try:
-        if archive_name.endswith(".zip"):
-            with zipfile.ZipFile(str(archive_path), "r") as zf:
-                zf.extractall(str(_MANAGED_FLUTTER_DIR))
-        elif archive_name.endswith((".tar.xz", ".tar.gz")):
-            with tarfile.open(str(archive_path), "r:*") as tf:
-                if sys.version_info >= (3, 12):
-                    tf.extractall(str(_MANAGED_FLUTTER_DIR), filter="fully_trusted")
-                else:
-                    tf.extractall(str(_MANAGED_FLUTTER_DIR))
-        else:
-            raise RuntimeError(f"Unknown archive format: {archive_name}")
+        _extract_archive(archive_path, _MANAGED_FLUTTER_DIR)
     finally:
         archive_path.unlink(missing_ok=True)
 
@@ -1609,18 +1601,7 @@ def _auto_download_jdk(major: int) -> str:
 
     print("  Extracting...")
     try:
-        n = archive_path.name.lower()
-        if n.endswith(".zip"):
-            with zipfile.ZipFile(str(archive_path), "r") as zf:
-                zf.extractall(str(tmp_extract))
-        elif n.endswith((".tar.gz", ".tgz", ".tar.xz", ".tar")):
-            with tarfile.open(str(archive_path), "r:*") as tf:
-                if sys.version_info >= (3, 12):
-                    tf.extractall(str(tmp_extract), filter="fully_trusted")
-                else:
-                    tf.extractall(str(tmp_extract))
-        else:
-            raise RuntimeError(f"Unknown JDK archive format: {archive_path.name}")
+        _extract_archive(archive_path, tmp_extract)
     finally:
         archive_path.unlink(missing_ok=True)
 
@@ -1768,6 +1749,16 @@ def _find_android_sdk() -> str | None:
     return None
 
 
+def _resolve_android_sdk() -> str | None:
+    """Find an existing Android SDK or download one.  Respects ``XG_NO_ANDROID_DOWNLOAD``."""
+    sdk = _find_android_sdk()
+    if sdk:
+        return sdk
+    if os.environ.get("XG_NO_ANDROID_DOWNLOAD", "").strip() not in ("", "0"):
+        return None  # user opted out
+    return _auto_download_android_sdk()
+
+
 def _auto_download_android_sdk() -> str:
     """
     Download the Android SDK command-line tools into ``~/.xg-glass/android-sdk/``
@@ -1786,7 +1777,7 @@ def _auto_download_android_sdk() -> str:
 
     print(f"  Downloading from: {url}")
     try:
-        urllib.request.urlretrieve(url, str(archive_path), _download_progress)
+        _download_file(url, archive_path)
         print()  # newline after progress
     except (urllib.error.URLError, OSError) as exc:
         archive_path.unlink(missing_ok=True)
@@ -1797,8 +1788,7 @@ def _auto_download_android_sdk() -> str:
 
     print("  Extracting...")
     try:
-        with zipfile.ZipFile(str(archive_path), "r") as zf:
-            zf.extractall(str(_MANAGED_ANDROID_SDK_DIR))
+        _extract_archive(archive_path, _MANAGED_ANDROID_SDK_DIR)
     finally:
         archive_path.unlink(missing_ok=True)
 
@@ -1818,8 +1808,7 @@ def _auto_download_android_sdk() -> str:
         sdkmanager = dest / "bin" / "sdkmanager.bat"
     else:
         sdkmanager = dest / "bin" / "sdkmanager"
-        if sdkmanager.exists():
-            sdkmanager.chmod(sdkmanager.stat().st_mode | 0o111)
+        _ensure_executable(sdkmanager)
 
     if not sdkmanager.exists():
         raise RuntimeError(
@@ -1887,11 +1876,9 @@ def _ensure_sdk_local_properties(sdk_root: Path) -> None:
                         return  # valid sdk.dir already set
         except Exception:
             pass
-    sdk_dir = _find_android_sdk()
+    sdk_dir = _resolve_android_sdk()
     if not sdk_dir:
-        if os.environ.get("XG_NO_ANDROID_DOWNLOAD", "").strip() not in ("", "0"):
-            return  # user opted out
-        sdk_dir = _auto_download_android_sdk()
+        return
     # Normalise to forward slashes (Gradle properties file convention).
     sdk_dir_escaped = sdk_dir.replace("\\", "/")
     lp.write_text(
@@ -1901,11 +1888,41 @@ def _ensure_sdk_local_properties(sdk_root: Path) -> None:
     )
 
 
-def _write_local_properties(project: Path) -> None:
-    sdk_dir = _find_android_sdk()
-    if not sdk_dir:
-        if os.environ.get("XG_NO_ANDROID_DOWNLOAD", "").strip() in ("", "0"):
-            sdk_dir = _auto_download_android_sdk()
+def _ensure_project_sdk_dir(project: Path, sdk_dir: str) -> None:
+    """Ensure project ``local.properties`` contains a valid ``sdk.dir``.
+
+    If the file already has a valid ``sdk.dir``, this is a no-op.
+    If the file exists but ``sdk.dir`` is missing/invalid, append it.
+    If the file doesn't exist, create it.
+    """
+    lp = project / "local.properties"
+    sdk_dir_escaped = sdk_dir.replace("\\", "/")
+    if lp.exists():
+        try:
+            text = lp.read_text(encoding="utf-8", errors="ignore")
+            for line in text.splitlines():
+                stripped = line.strip()
+                if stripped.startswith("sdk.dir=") and not stripped.startswith("sdk.dir=#"):
+                    val = stripped.split("=", 1)[1].strip()
+                    if val and Path(val.replace("/", os.sep)).is_dir():
+                        return  # already valid
+            # File exists but no valid sdk.dir – append.
+            with lp.open("a", encoding="utf-8") as f:
+                f.write(f"\nsdk.dir={sdk_dir_escaped}\n")
+        except Exception:
+            pass
+        return
+    # File does not exist – create a minimal one.
+    lp.write_text(
+        "## Auto-generated by xg-glass CLI – do NOT commit.\n"
+        f"sdk.dir={sdk_dir_escaped}\n",
+        encoding="utf-8",
+    )
+
+
+def _write_local_properties(project: Path, sdk_dir: str | None = None) -> None:
+    if sdk_dir is None:
+        sdk_dir = _resolve_android_sdk()
     lp = project / "local.properties"
     if sdk_dir:
         sdk_dir_escaped = sdk_dir.replace("\\", "/")
