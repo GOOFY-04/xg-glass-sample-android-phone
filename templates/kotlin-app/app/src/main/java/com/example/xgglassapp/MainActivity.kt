@@ -3,6 +3,7 @@ package com.example.xgglassapp
 import android.Manifest
 import android.content.Context
 import android.graphics.BitmapFactory
+import android.net.Uri
 import android.os.Bundle
 import android.text.InputType
 import android.widget.ArrayAdapter
@@ -38,6 +39,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.withContext
+import java.io.File
 
 class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -53,6 +55,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvSettingsTitle: TextView
     private lateinit var llSettings: LinearLayout
     private lateinit var btnApplySettings: Button
+
+    // Rokid runtime credential UI
+    private lateinit var llRokidConfig: LinearLayout
+    private lateinit var btnPickSnLicense: Button
+    private lateinit var tvSnLicenseFile: TextView
+    private lateinit var etRokidSecret: EditText
 
     private val entry: UniversalAppEntry? by lazy { loadEntryOrNull() }
 
@@ -83,6 +91,30 @@ class MainActivity : AppCompatActivity() {
         if (model != null) connect(model)
     }
 
+    /** Launcher for picking the Rokid SN license (.lc) file at runtime. */
+    private val pickSnLicenseLauncher = registerForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri == null) return@registerForActivityResult
+        try {
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            if (bytes == null || bytes.isEmpty()) {
+                appendLog("Rokid: selected file is empty.")
+                return@registerForActivityResult
+            }
+            // Persist the .lc bytes into internal storage so we survive app restarts.
+            val lcFile = File(filesDir, ROKID_LC_FILENAME)
+            lcFile.writeBytes(bytes)
+            // Extract a display name for the UI.
+            val displayName = queryFileName(uri) ?: "sn_license.lc"
+            rokidPrefs.edit().putString(PREF_ROKID_LC_DISPLAY_NAME, displayName).apply()
+            tvSnLicenseFile.text = displayName
+            appendLog("Rokid: SN license loaded (${bytes.size} bytes).")
+        } catch (e: Exception) {
+            appendLog("Rokid: failed to read file – ${e.message}")
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -98,6 +130,19 @@ class MainActivity : AppCompatActivity() {
         tvSettingsTitle = findViewById(R.id.tvSettingsTitle)
         llSettings = findViewById(R.id.llSettings)
         btnApplySettings = findViewById(R.id.btnApplySettings)
+
+        // Rokid runtime credential UI
+        llRokidConfig = findViewById(R.id.llRokidConfig)
+        btnPickSnLicense = findViewById(R.id.btnPickSnLicense)
+        tvSnLicenseFile = findViewById(R.id.tvSnLicenseFile)
+        etRokidSecret = findViewById(R.id.etRokidSecret)
+
+        // Restore previously-saved Rokid credentials into the UI.
+        restoreRokidCredentialUI()
+
+        btnPickSnLicense.setOnClickListener {
+            pickSnLicenseLauncher.launch(arrayOf("*/*"))
+        }
 
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
@@ -120,6 +165,8 @@ class MainActivity : AppCompatActivity() {
                 val selected = spDevice.selectedItem?.toString() ?: "ROKID"
                 etRayNeoIp.visibility =
                     if (selected == "RAYNEO") android.view.View.VISIBLE else android.view.View.GONE
+                llRokidConfig.visibility =
+                    if (selected == "ROKID") android.view.View.VISIBLE else android.view.View.GONE
             }
 
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -132,6 +179,10 @@ class MainActivity : AppCompatActivity() {
                 "FRAME" -> GlassesModel.FRAME
                 "RAYNEO" -> GlassesModel.RAYNEO
                 else -> GlassesModel.ROKID
+            }
+            // Save Rokid credentials entered in the UI before connecting.
+            if (model == GlassesModel.ROKID) {
+                saveRokidCredentials()
             }
             ensurePermissionsThenConnect(model)
         }
@@ -228,19 +279,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createRokidClient(): RokidGlassesClient {
-        val secret = BuildConfig.ROKID_CLIENT_SECRET.trim()
-        val rawName = BuildConfig.ROKID_SN_RAW_NAME.trim()
+        // 1. Try runtime credentials (user-provided via in-app UI).
+        val auth = loadRokidAuthFromRuntime()
+            // 2. Fall back to build-time credentials (local.properties / env / res/raw).
+            ?: loadRokidAuthFromBuildConfig()
 
-        val auth = loadRokidAuthorizationOrNull(
-            rawName = rawName,
-            clientSecret = secret,
-        )
         if (auth == null) {
             appendLog(
-                "Rokid: SN auth missing. Put your .lc under app/src/main/res/raw/ and set in local.properties:\n" +
-                    "  rokid.clientSecret=<your-client-secret>\n" +
-                    "  rokid.snRawName=<raw_resource_name_without_extension>\n" +
-                    "Or use env vars ROKID_CLIENT_SECRET / ROKID_SN_RAW_NAME."
+                "Rokid: SN auth missing.\n" +
+                    "  Option A (recommended): select your .lc file and enter client secret in the UI above.\n" +
+                    "  Option B: put .lc under app/src/main/res/raw/ and set in local.properties:\n" +
+                    "    rokid.clientSecret=<your-client-secret>\n" +
+                    "    rokid.snRawName=<raw_resource_name_without_extension>"
             )
         }
 
@@ -250,13 +300,34 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun loadRokidAuthorizationOrNull(
-        rawName: String,
-        clientSecret: String,
-    ): RokidGlassesClient.RokidAuthorization? {
-        if (rawName.isBlank() || clientSecret.isBlank()) return null
+    /**
+     * Load Rokid authorization from runtime user input (internal storage + SharedPreferences).
+     */
+    private fun loadRokidAuthFromRuntime(): RokidGlassesClient.RokidAuthorization? {
+        val secret = rokidPrefs.getString(PREF_ROKID_CLIENT_SECRET, null)?.trim().orEmpty()
+        if (secret.isBlank()) return null
 
-        // rawName is the resource entry name without extension, e.g. "sn_0a98..." for res/raw/sn_0a98....lc
+        val lcFile = File(filesDir, ROKID_LC_FILENAME)
+        if (!lcFile.exists()) return null
+        val bytes = try { lcFile.readBytes() } catch (_: Exception) { ByteArray(0) }
+        if (bytes.isEmpty()) return null
+
+        return RokidGlassesClient.RokidAuthorization(
+            snLc = bytes,
+            clientSecret = secret,
+        )
+    }
+
+    /**
+     * Load Rokid authorization from build-time config (BuildConfig fields + res/raw resource).
+     * This is the legacy path: developer sets rokid.clientSecret / rokid.snRawName in
+     * local.properties (or env vars) and places the .lc file in app/src/main/res/raw/.
+     */
+    private fun loadRokidAuthFromBuildConfig(): RokidGlassesClient.RokidAuthorization? {
+        val secret = BuildConfig.ROKID_CLIENT_SECRET.trim()
+        val rawName = BuildConfig.ROKID_SN_RAW_NAME.trim()
+        if (rawName.isBlank() || secret.isBlank()) return null
+
         val resId = resources.getIdentifier(rawName, "raw", packageName)
         if (resId == 0) return null
 
@@ -269,7 +340,7 @@ class MainActivity : AppCompatActivity() {
 
         return RokidGlassesClient.RokidAuthorization(
             snLc = bytes,
-            clientSecret = clientSecret,
+            clientSecret = secret,
         )
     }
 
@@ -496,6 +567,46 @@ class MainActivity : AppCompatActivity() {
             val stored = settingsPrefs.getString(field.key, null)
             field.key to (stored ?: field.defaultValue)
         }
+    }
+
+    // ===================================================================
+    // Rokid runtime credentials
+    // ===================================================================
+
+    private val rokidPrefs by lazy {
+        getSharedPreferences("ug_rokid_credentials", Context.MODE_PRIVATE)
+    }
+
+    /** Save the client secret from the UI into SharedPreferences. */
+    private fun saveRokidCredentials() {
+        val secret = etRokidSecret.text?.toString().orEmpty().trim()
+        rokidPrefs.edit().putString(PREF_ROKID_CLIENT_SECRET, secret).apply()
+    }
+
+    /** Restore previously-saved credentials into the Rokid config UI. */
+    private fun restoreRokidCredentialUI() {
+        val secret = rokidPrefs.getString(PREF_ROKID_CLIENT_SECRET, null).orEmpty()
+        if (secret.isNotBlank()) etRokidSecret.setText(secret)
+        val displayName = rokidPrefs.getString(PREF_ROKID_LC_DISPLAY_NAME, null)
+        if (!displayName.isNullOrBlank()) tvSnLicenseFile.text = displayName
+    }
+
+    /** Try to extract a display file name from a content URI. */
+    private fun queryFileName(uri: Uri): String? {
+        val cursor = contentResolver.query(uri, null, null, null, null) ?: return null
+        return cursor.use {
+            if (it.moveToFirst()) {
+                val idx = it.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0) it.getString(idx) else null
+            } else null
+        }
+    }
+
+    private companion object {
+        /** Internal storage file name for the persisted Rokid SN license bytes. */
+        const val ROKID_LC_FILENAME = "rokid_sn_license.lc"
+        const val PREF_ROKID_CLIENT_SECRET = "rokid_client_secret"
+        const val PREF_ROKID_LC_DISPLAY_NAME = "rokid_lc_display_name"
     }
 
     // ===================================================================

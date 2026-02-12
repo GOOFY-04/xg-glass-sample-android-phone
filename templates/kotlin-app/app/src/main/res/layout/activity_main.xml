@@ -24,6 +24,54 @@
         android:inputType="text"
         android:visibility="gone" />
 
+    <!-- Rokid runtime credentials (shown when ROKID is selected) -->
+    <LinearLayout
+        android:id="@+id/llRokidConfig"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone">
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Rokid Credentials"
+            android:textStyle="bold" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical">
+
+            <Button
+                android:id="@+id/btnPickSnLicense"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Select SN License (.lc)"
+                android:textSize="12sp" />
+
+            <TextView
+                android:id="@+id/tvSnLicenseFile"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:layout_marginStart="8dp"
+                android:text="No file selected"
+                android:textSize="12sp"
+                android:ellipsize="middle"
+                android:singleLine="true" />
+        </LinearLayout>
+
+        <EditText
+            android:id="@+id/etRokidSecret"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="Client Secret"
+            android:inputType="textPassword" />
+    </LinearLayout>
+
     <Button
         android:id="@+id/btnConnect"
         android:layout_width="match_parent"

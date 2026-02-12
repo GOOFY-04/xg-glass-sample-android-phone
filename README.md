@@ -50,13 +50,20 @@ Welcome the contributions from the community on more glasses!
 
 ### App developers (build apps with the SDK)
 
-#### Prerequisites
+## Prerequisites
 
-- **JDK 17**
-- **Android SDK + platform tools** (you need `adb` on your `PATH`)
-- **An Android phone** with USB debugging enabled
-- **Flutter** is required on your machine since the SDK embeds a Flutter module at build time for Frame
-- **Android emulator** is required if you want to use the simulation mode
+### Host machine
+
+- **JDK 17 or 21**
+- **Android SDK + Platform Tools** (ensure `adb` is on your `PATH`)
+- **Flutter** (required because the SDK embeds a Flutter module at build time for Frame)
+- **Android Emulator** (for simulation mode)
+
+### Device
+
+- **An Android phone** with **USB debugging** enabled
+
+The **xg-glass CLI** (see below) can automatically set up the host prerequisites above.
 
 #### Installation
 
@@ -85,9 +92,9 @@ For a stable workflow, generate a minimal project and iterate:
 ```bash
 xg-glass init /path/to/myapp
 cd /path/to/myapp
-/path/to/xg-glass-sdk/xg-glass build
-/path/to/xg-glass-sdk/xg-glass install
-/path/to/xg-glass-sdk/xg-glass run
+xg-glass build
+xg-glass install
+xg-glass run
 ```
 
 We also support a simulator (simply add `--sim`) for development and testing that can run on your PC with a webcam:
@@ -99,9 +106,9 @@ xg-glass run --sim /path/to/MyEntry.kt
 # Stable workflow
 xg-glass init --sim /path/to/myapp
 cd /path/to/myapp
-/path/to/xg-glass-sdk/xg-glass build
-/path/to/xg-glass-sdk/xg-glass install
-/path/to/xg-glass-sdk/xg-glass run
+xg-glass build
+xg-glass install
+xg-glass run
 ```
 
 The launch of Android Emulator may take serval minutes. You can keep it on to save time for the next run. 
