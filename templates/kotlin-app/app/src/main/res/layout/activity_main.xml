@@ -30,6 +30,30 @@
         android:layout_height="wrap_content"
         android:text="Connect" />
 
+    <!-- User settings (dynamically populated by host from UniversalAppEntry.userSettings()) -->
+    <TextView
+        android:id="@+id/tvSettingsTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:text="Settings"
+        android:textStyle="bold"
+        android:visibility="gone" />
+
+    <LinearLayout
+        android:id="@+id/llSettings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:visibility="gone" />
+
+    <Button
+        android:id="@+id/btnApplySettings"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Apply Settings"
+        android:visibility="gone" />
+
     <TextView
         android:id="@+id/tvCommandsTitle"
         android:layout_width="match_parent"

@@ -1,8 +1,10 @@
 package com.example.xgglassapp
 
 import android.Manifest
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.os.Bundle
+import android.text.InputType
 import android.widget.ArrayAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -17,6 +19,8 @@ import com.universalglasses.appcontract.HostEnvironment
 import com.universalglasses.appcontract.HostKind
 import com.universalglasses.appcontract.UniversalAppContext
 import com.universalglasses.appcontract.UniversalAppEntry
+import com.universalglasses.appcontract.UserSettingField
+import com.universalglasses.appcontract.UserSettingInputType
 import com.universalglasses.appcontract.commandsWithDefaults
 import com.universalglasses.core.ConnectionState
 import com.universalglasses.core.GlassesEvent
@@ -46,8 +50,17 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvDisplay: TextView
     private lateinit var etRayNeoIp: EditText
     private lateinit var llCommands: LinearLayout
+    private lateinit var tvSettingsTitle: TextView
+    private lateinit var llSettings: LinearLayout
+    private lateinit var btnApplySettings: Button
 
     private val entry: UniversalAppEntry? by lazy { loadEntryOrNull() }
+
+    /** Map of setting key → EditText widget, populated by [renderSettings]. */
+    private val settingEdits = mutableMapOf<String, EditText>()
+
+    /** Current applied settings (key → value). */
+    private var appliedSettings: Map<String, String> = emptyMap()
 
     private var client: com.universalglasses.core.GlassesClient? = null
     private var connectJob: Job? = null
@@ -82,6 +95,9 @@ class MainActivity : AppCompatActivity() {
         tvDisplay = findViewById(R.id.tvDisplay)
         etRayNeoIp = findViewById(R.id.etRayNeoIp)
         llCommands = findViewById(R.id.llCommands)
+        tvSettingsTitle = findViewById(R.id.tvSettingsTitle)
+        llSettings = findViewById(R.id.llSettings)
+        btnApplySettings = findViewById(R.id.btnApplySettings)
 
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
@@ -119,6 +135,10 @@ class MainActivity : AppCompatActivity() {
             }
             ensurePermissionsThenConnect(model)
         }
+
+        renderSettings()
+
+        btnApplySettings.setOnClickListener { applySettings() }
 
         renderCommandsForCurrentSelection(connected = false)
 
@@ -195,6 +215,14 @@ class MainActivity : AppCompatActivity() {
 
             val r = newClient.connect()
             appendLog("connect(${model.name}) => ${r.isSuccess} ${r.exceptionOrNull()?.message ?: ""}")
+
+            // After successful RayNeo install, push the current user settings to the glasses.
+            if (r.isSuccess && newClient is RayNeoInstallerGlassesClient && appliedSettings.isNotEmpty()) {
+                val pushR = newClient.pushUserSettings(appliedSettings)
+                if (pushR.isSuccess) appendLog("Settings synced to RayNeo glasses.")
+                else appendLog("Settings sync failed: ${pushR.exceptionOrNull()?.message}")
+            }
+
             btnConnect.isEnabled = true
         }
     }
@@ -338,7 +366,8 @@ class MainActivity : AppCompatActivity() {
                                         if (bmp != null) ivPreview.setImageBitmap(bmp)
                                     }
                                 }
-                            }
+                            },
+                            settings = appliedSettings,
                         )
                         val r = cmd.run(ctx)
                         if (r.isFailure) appendLog("Command failed: ${r.exceptionOrNull()?.message ?: "unknown"}")
@@ -347,6 +376,129 @@ class MainActivity : AppCompatActivity() {
             })
         }
     }
+
+    // ===================================================================
+    // User settings UI
+    // ===================================================================
+
+    private val settingsPrefs by lazy {
+        getSharedPreferences("ug_user_settings", Context.MODE_PRIVATE)
+    }
+
+    /**
+     * Render input fields for the entry's [UniversalAppEntry.userSettings].
+     * Values are pre-filled from SharedPreferences (falling back to defaults).
+     */
+    private fun renderSettings() {
+        val e = entry ?: return
+        val fields = e.userSettings()
+        if (fields.isEmpty()) return
+
+        tvSettingsTitle.visibility = android.view.View.VISIBLE
+        llSettings.visibility = android.view.View.VISIBLE
+        btnApplySettings.visibility = android.view.View.VISIBLE
+        llSettings.removeAllViews()
+        settingEdits.clear()
+
+        for (field in fields) {
+            val label = TextView(this).apply {
+                text = field.label
+                setPadding(0, 12, 0, 2)
+            }
+            llSettings.addView(label)
+
+            val editText = EditText(this).apply {
+                hint = field.hint
+                inputType = when (field.inputType) {
+                    UserSettingInputType.PASSWORD ->
+                        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
+                    UserSettingInputType.URL ->
+                        InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+                    UserSettingInputType.NUMBER ->
+                        InputType.TYPE_CLASS_NUMBER
+                    else ->
+                        InputType.TYPE_CLASS_TEXT
+                }
+                layoutParams = LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                )
+                // Restore from prefs, or use default
+                val stored = settingsPrefs.getString(field.key, null)
+                setText(stored ?: field.defaultValue)
+            }
+            llSettings.addView(editText)
+            settingEdits[field.key] = editText
+        }
+
+        // Build the initial applied settings from stored/default values.
+        appliedSettings = buildSettingsMap(fields)
+    }
+
+    /** Save current input values to SharedPreferences and update [appliedSettings]. */
+    private fun applySettings() {
+        val e = entry ?: return
+        val fields = e.userSettings()
+        val editor = settingsPrefs.edit()
+        for (field in fields) {
+            val value = settingEdits[field.key]?.text?.toString().orEmpty()
+            editor.putString(field.key, value)
+        }
+        editor.apply()
+        appliedSettings = buildSettingsMap(fields)
+        appendLog("Settings applied.")
+
+        // For RayNeo: also push the settings file to the glasses via ADB so the
+        // on-glasses host can read them.
+        pushSettingsToRayNeoIfNeeded()
+    }
+
+    /**
+     * If the current (or last-configured) glasses model is RAYNEO and we have an IP,
+     * push the settings JSON to the glasses via ADB.
+     */
+    private fun pushSettingsToRayNeoIfNeeded() {
+        if (appliedSettings.isEmpty()) return
+
+        // Use existing client if it's already a RayNeo installer …
+        val rayNeoClient = client as? RayNeoInstallerGlassesClient
+
+        // … otherwise create a transient one if the user has selected RAYNEO and entered an IP.
+        val selected = spDevice.selectedItem?.toString()
+        val ip = etRayNeoIp.text?.toString()?.trim().orEmpty()
+
+        if (rayNeoClient == null && (selected != "RAYNEO" || ip.isBlank())) return
+
+        scope.launch {
+            try {
+                val pusher = rayNeoClient ?: RayNeoInstallerGlassesClient(
+                    context = this@MainActivity,
+                    config = RayNeoInstallerConfig(
+                        host = ip,
+                        apk = RayNeoApkSource.Asset("rayneo_glass_app.apk"),
+                    ),
+                )
+                val r = pusher.pushUserSettings(appliedSettings)
+                if (r.isSuccess) {
+                    appendLog("Settings pushed to RayNeo glasses.")
+                } else {
+                    appendLog("Settings push failed: ${r.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                appendLog("Settings push error: ${e.message}")
+            }
+        }
+    }
+
+    /** Build a key→value map from current SharedPreferences (or defaults). */
+    private fun buildSettingsMap(fields: List<UserSettingField>): Map<String, String> {
+        return fields.associate { field ->
+            val stored = settingsPrefs.getString(field.key, null)
+            field.key to (stored ?: field.defaultValue)
+        }
+    }
+
+    // ===================================================================
 
     private fun loadEntryOrNull(): UniversalAppEntry? {
         val cls = try {
