@@ -50,20 +50,14 @@ Welcome the contributions from the community on more glasses!
 
 ### App developers (build apps with the SDK)
 
-## Prerequisites
-
-### Host machine
+#### Host machine prerequisites
 
 - **JDK 17 or 21**
 - **Android SDK + Platform Tools** (ensure `adb` is on your `PATH`)
 - **Flutter** (required because the SDK embeds a Flutter module at build time for Frame)
 - **Android Emulator** (for simulation mode)
 
-### Device
-
-- **An Android phone** with **USB debugging** enabled
-
-The **xg-glass CLI** (see below) can automatically set up the host prerequisites above.
+The **xg-glass CLI** (see below) can automatically set up the host prerequisites above. You'll also need an Android phone with USB debugging enabled for testing on real devices.
 
 #### Installation
 
