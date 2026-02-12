@@ -50,6 +50,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnConnect: Button
     private lateinit var ivPreview: ImageView
     private lateinit var tvDisplay: TextView
+    private lateinit var tvDisplayTitle: TextView
     private lateinit var etRayNeoIp: EditText
     private lateinit var llCommands: LinearLayout
     private lateinit var tvSettingsTitle: TextView
@@ -125,6 +126,7 @@ class MainActivity : AppCompatActivity() {
         btnConnect = findViewById(R.id.btnConnect)
         ivPreview = findViewById(R.id.ivPreview)
         tvDisplay = findViewById(R.id.tvDisplay)
+        tvDisplayTitle = findViewById(R.id.tvDisplayTitle)
         etRayNeoIp = findViewById(R.id.etRayNeoIp)
         llCommands = findViewById(R.id.llCommands)
         tvSettingsTitle = findViewById(R.id.tvSettingsTitle)
@@ -162,11 +164,7 @@ class MainActivity : AppCompatActivity() {
                 position: Int,
                 id: Long
             ) {
-                val selected = spDevice.selectedItem?.toString() ?: "ROKID"
-                etRayNeoIp.visibility =
-                    if (selected == "RAYNEO") android.view.View.VISIBLE else android.view.View.GONE
-                llRokidConfig.visibility =
-                    if (selected == "ROKID") android.view.View.VISIBLE else android.view.View.GONE
+                onDeviceSelectionChanged(spDevice.selectedItem?.toString() ?: "ROKID")
             }
 
             override fun onNothingSelected(parent: android.widget.AdapterView<*>?) {}
@@ -191,7 +189,13 @@ class MainActivity : AppCompatActivity() {
 
         btnApplySettings.setOnClickListener { applySettings() }
 
+        // Settings title click toggles collapsible content
+        tvSettingsTitle.setOnClickListener { toggleSettingsCollapse() }
+
         renderCommandsForCurrentSelection(connected = false)
+
+        // Set initial display visibility based on default device selection
+        onDeviceSelectionChanged(spDevice.selectedItem?.toString() ?: "ROKID")
 
         if (BuildConfig.XG_SIMULATOR) {
             // Simulator builds are meant to run on an emulator; auto-connect.
@@ -390,6 +394,35 @@ class MainActivity : AppCompatActivity() {
         tvLog.text = tvLog.text.toString() + "\n" + msg
     }
 
+    /** Update UI elements that depend on the currently selected device. */
+    private fun onDeviceSelectionChanged(selected: String) {
+        etRayNeoIp.visibility =
+            if (selected == "RAYNEO") android.view.View.VISIBLE else android.view.View.GONE
+        llRokidConfig.visibility =
+            if (selected == "ROKID") android.view.View.VISIBLE else android.view.View.GONE
+
+        // Display section is only useful for SIMULATOR mode
+        val showDisplay = selected == "SIMULATOR"
+        tvDisplayTitle.visibility =
+            if (showDisplay) android.view.View.VISIBLE else android.view.View.GONE
+        tvDisplay.visibility =
+            if (showDisplay) android.view.View.VISIBLE else android.view.View.GONE
+    }
+
+    /** Toggle the collapsible settings panel. */
+    private fun toggleSettingsCollapse() {
+        val isVisible = llSettings.visibility == android.view.View.VISIBLE
+        if (isVisible) {
+            llSettings.visibility = android.view.View.GONE
+            btnApplySettings.visibility = android.view.View.GONE
+            tvSettingsTitle.text = "▶ Settings"
+        } else {
+            llSettings.visibility = android.view.View.VISIBLE
+            btnApplySettings.visibility = android.view.View.VISIBLE
+            tvSettingsTitle.text = "▼ Settings"
+        }
+    }
+
     private fun renderCommandsForCurrentSelection(connected: Boolean) {
         val model = when (spDevice.selectedItem?.toString()) {
             "SIMULATOR" -> GlassesModel.SIMULATOR
@@ -466,8 +499,10 @@ class MainActivity : AppCompatActivity() {
         if (fields.isEmpty()) return
 
         tvSettingsTitle.visibility = android.view.View.VISIBLE
-        llSettings.visibility = android.view.View.VISIBLE
-        btnApplySettings.visibility = android.view.View.VISIBLE
+        // Start collapsed — user clicks title to expand
+        llSettings.visibility = android.view.View.GONE
+        btnApplySettings.visibility = android.view.View.GONE
+        tvSettingsTitle.text = "▶ AI Settings"
         llSettings.removeAllViews()
         settingEdits.clear()
 
