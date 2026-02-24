@@ -52,5 +52,3 @@ Optional:
 - `--project`: specify the project root (default: current directory)
 - `--variant`: default `debug`
 - `--serial`: specify the adb device serial (optional)
-
-

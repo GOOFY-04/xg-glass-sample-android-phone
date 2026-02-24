@@ -55,5 +55,3 @@ interface GlassesClient {
      */
     suspend fun startMicrophone(options: MicrophoneOptions = MicrophoneOptions()): Result<MicrophoneSession>
 }
-
-

@@ -480,5 +480,3 @@ private object ShellProtocol {
         }
     }
 }
-
-

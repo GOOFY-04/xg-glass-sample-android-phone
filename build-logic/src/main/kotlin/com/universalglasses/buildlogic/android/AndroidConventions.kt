@@ -18,5 +18,3 @@ internal fun CommonExtension<*, *, *, *, *, *>.applyUniversalGlassesAndroidDefau
         targetCompatibility = JavaVersion.VERSION_1_8
     }
 }
-
-

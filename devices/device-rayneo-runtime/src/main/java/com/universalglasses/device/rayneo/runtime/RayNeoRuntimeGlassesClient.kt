@@ -597,5 +597,3 @@ class ToastDisplaySink : RayNeoDisplaySink {
         }
     }
 }
-
-

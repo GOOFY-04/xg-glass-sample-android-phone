@@ -58,5 +58,3 @@ if (flutterInclude.exists()) {
     include(":device-frame-embedded")
     project(":device-frame-embedded").projectDir = file("devices/device-frame-embedded")
 }
-
-

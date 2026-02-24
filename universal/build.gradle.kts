@@ -28,5 +28,3 @@ dependencies {
         api(project(":device-frame-embedded"))
     }
 }
-
-

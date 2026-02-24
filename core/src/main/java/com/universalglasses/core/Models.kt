@@ -52,5 +52,3 @@ data class CapturedImage(
     val rotationDegrees: Int? = null,
     val sourceModel: GlassesModel,
 )
-
-

@@ -734,5 +734,3 @@ class RokidGlassesClient(
         const val PREF_KEY_MAC_ADDRESS = "mac_address"
     }
 }
-
-
