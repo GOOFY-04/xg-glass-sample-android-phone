@@ -2,8 +2,14 @@ package com.universalglasses.device.sim
 
 import android.Manifest
 import android.graphics.BitmapFactory
+import android.media.AudioAttributes
+import android.media.AudioManager
 import android.media.AudioRecord
+import android.media.AudioTrack
+import android.media.MediaPlayer
 import android.media.MediaRecorder
+import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import androidx.appcompat.app.AppCompatActivity
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageCapture
@@ -22,9 +28,13 @@ import com.universalglasses.core.GlassesClient
 import com.universalglasses.core.GlassesError
 import com.universalglasses.core.GlassesEvent
 import com.universalglasses.core.GlassesModel
+import com.universalglasses.core.AudioSource
 import com.universalglasses.core.MicrophoneOptions
 import com.universalglasses.core.MicrophoneSession
+import com.universalglasses.core.PcmFormat
+import com.universalglasses.core.PlayAudioOptions
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -34,10 +44,12 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -63,6 +75,8 @@ class EmulatorGlassesClient(
         canCapturePhoto = true,
         canDisplayText = true,
         canRecordAudio = true,
+        canPlayTts = true,
+        canPlayAudioBytes = true,
         supportsTapEvents = false,
         supportsStreamingTextUpdates = false,
     )
@@ -80,6 +94,8 @@ class EmulatorGlassesClient(
     private var imageCapture: ImageCapture? = null
 
     @Volatile private var activeMic: MicrophoneSession? = null
+    @Volatile private var tts: TextToSpeech? = null
+    @Volatile private var activePlayer: MediaPlayer? = null
 
     override suspend fun connect(): Result<Unit> {
         if (_state.value is ConnectionState.Connected || _state.value is ConnectionState.Connecting) {
@@ -105,13 +121,13 @@ class EmulatorGlassesClient(
 
     override suspend fun disconnect() {
         emitLog("Simulator: disconnect (no-op)")
-
-        // Ensure any active mic session is stopped to avoid leaking AudioRecord resources.
-        try {
-            activeMic?.stop()
-        } catch (_: Exception) {
-            // ignore
-        }
+        try { activeMic?.stop() } catch (_: Exception) {}
+        activeMic = null
+        try { activePlayer?.release() } catch (_: Exception) {}
+        activePlayer = null
+        try { tts?.stop() } catch (_: Exception) {}
+        try { tts?.shutdown() } catch (_: Exception) {}
+        tts = null
 
         withContext(Dispatchers.Main) {
             cameraProvider?.unbindAll()
@@ -194,6 +210,210 @@ class EmulatorGlassesClient(
             Result.success(Unit)
         } catch (e: Exception) {
             Result.failure(e)
+        }
+    }
+
+    override suspend fun playAudio(source: AudioSource, options: PlayAudioOptions): Result<Unit> {
+        return when (source) {
+            is AudioSource.Tts -> playTts(source, options)
+            is AudioSource.RawBytes -> playRawBytes(source, options)
+        }
+    }
+
+    private suspend fun playTts(source: AudioSource.Tts, options: PlayAudioOptions): Result<Unit> {
+        val content = source.text.trim()
+        if (content.isEmpty()) return Result.success(Unit)
+
+        return try {
+            val engine = ensureTts()
+            val utteranceId = "sim-${System.currentTimeMillis()}"
+            val done = CompletableDeferred<Unit>()
+
+            engine.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                override fun onStart(id: String?) {}
+                @Deprecated("Deprecated in API 21")
+                override fun onError(id: String?) {
+                    if (id == utteranceId) done.completeExceptionally(
+                        GlassesError.Transport("Simulator TTS error")
+                    )
+                }
+                override fun onError(id: String?, errorCode: Int) {
+                    if (id == utteranceId) done.completeExceptionally(
+                        GlassesError.Transport("Simulator TTS error: $errorCode")
+                    )
+                }
+                override fun onDone(id: String?) {
+                    if (id == utteranceId) done.complete(Unit)
+                }
+            })
+
+            withContext(Dispatchers.Main) {
+                val rate = options.speechRate
+                if (rate != null) engine.setSpeechRate(rate.coerceIn(0.1f, 4.0f))
+                val q = if (options.interrupt) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                val r = engine.speak(content, q, null, utteranceId)
+                if (r != TextToSpeech.SUCCESS) {
+                    throw GlassesError.Transport("Simulator TTS speak() returned $r")
+                }
+            }
+
+            withTimeoutOrNull(30_000) { done.await() }
+            emitLog("Simulator: playAudio(TTS) => done")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(
+                (e as? GlassesError) ?: GlassesError.Transport("Simulator playAudio(TTS) failed: ${e.message}", e)
+            )
+        }
+    }
+
+    private suspend fun playRawBytes(source: AudioSource.RawBytes, options: PlayAudioOptions): Result<Unit> {
+        val data = source.data
+        if (data.isEmpty()) return Result.success(Unit)
+
+        return try {
+            if (options.interrupt) {
+                try { activePlayer?.release() } catch (_: Exception) {}
+                activePlayer = null
+            }
+
+            val pcm = source.pcmFormat
+            if (pcm != null) {
+                playPcm(data, pcm)
+            } else {
+                playEncoded(data)
+            }
+            emitLog("Simulator: playAudio(RawBytes) => done (${data.size} bytes)")
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Result.failure(
+                (e as? GlassesError) ?: GlassesError.Transport("Simulator playAudio(RawBytes) failed: ${e.message}", e)
+            )
+        }
+    }
+
+    private suspend fun playPcm(data: ByteArray, pcm: PcmFormat) {
+        val sampleRate = pcm.sampleRateHz
+        val channels = pcm.channelCount
+        val channelMask = if (channels <= 1)
+            android.media.AudioFormat.CHANNEL_OUT_MONO else android.media.AudioFormat.CHANNEL_OUT_STEREO
+        val enc = when (pcm.encoding) {
+            AudioEncoding.PCM_S16_LE -> android.media.AudioFormat.ENCODING_PCM_16BIT
+            AudioEncoding.PCM_S8 -> android.media.AudioFormat.ENCODING_PCM_8BIT
+            AudioEncoding.OPUS -> throw GlassesError.Unsupported("Simulator playAudio: OPUS not supported")
+        }
+
+        val minBuf = AudioTrack.getMinBufferSize(sampleRate, channelMask, enc).coerceAtLeast(1024)
+        val track = AudioTrack.Builder()
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build()
+            )
+            .setAudioFormat(
+                android.media.AudioFormat.Builder()
+                    .setSampleRate(sampleRate)
+                    .setChannelMask(channelMask)
+                    .setEncoding(enc)
+                    .build()
+            )
+            .setTransferMode(AudioTrack.MODE_STREAM)
+            .setBufferSizeInBytes(minBuf)
+            .build()
+
+        if (track.state != AudioTrack.STATE_INITIALIZED) {
+            track.release()
+            throw GlassesError.Transport("Simulator AudioTrack not initialized")
+        }
+
+        try {
+            track.play()
+            var written = 0
+            while (written < data.size) {
+                val n = track.write(data, written, minOf(4096, data.size - written))
+                if (n <= 0) break
+                written += n
+            }
+            val bytesPerSample = if (enc == android.media.AudioFormat.ENCODING_PCM_16BIT) 2 else 1
+            val bytesPerSecond = sampleRate.toLong() * channels * bytesPerSample
+            if (bytesPerSecond > 0) delay(data.size * 1000L / bytesPerSecond + 200L)
+        } finally {
+            runCatching { track.stop() }
+            track.release()
+        }
+    }
+
+    private suspend fun playEncoded(data: ByteArray) {
+        val tmpFile = File(activity.cacheDir, "sim_audio_${System.currentTimeMillis()}.tmp")
+        try {
+            tmpFile.writeBytes(data)
+            withContext(Dispatchers.Main) {
+                suspendCancellableCoroutine<Unit> { cont ->
+                    val mp = MediaPlayer()
+                    activePlayer = mp
+                    mp.setDataSource(tmpFile.absolutePath)
+                    mp.setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    mp.setOnCompletionListener {
+                        mp.release()
+                        activePlayer = null
+                        tmpFile.delete()
+                        if (cont.isActive) cont.resume(Unit)
+                    }
+                    mp.setOnErrorListener { _, what, extra ->
+                        mp.release()
+                        activePlayer = null
+                        tmpFile.delete()
+                        if (cont.isActive) cont.resumeWithException(
+                            GlassesError.Transport("Simulator MediaPlayer error: what=$what extra=$extra")
+                        )
+                        true
+                    }
+                    mp.prepare()
+                    mp.start()
+                    cont.invokeOnCancellation {
+                        mp.release()
+                        activePlayer = null
+                        tmpFile.delete()
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            tmpFile.delete()
+            throw e
+        }
+    }
+
+    private suspend fun ensureTts(): TextToSpeech {
+        val existing = tts
+        if (existing != null) return existing
+
+        return withContext(Dispatchers.Main) {
+            val again = tts
+            if (again != null) return@withContext again
+
+            suspendCancellableCoroutine { cont ->
+                var engine: TextToSpeech? = null
+                engine = TextToSpeech(activity) { status ->
+                    val inst = engine ?: return@TextToSpeech
+                    if (!cont.isActive) return@TextToSpeech
+                    if (status != TextToSpeech.SUCCESS) {
+                        try { inst.shutdown() } catch (_: Exception) {}
+                        cont.resumeWithException(GlassesError.Transport("TextToSpeech init failed: $status"))
+                        return@TextToSpeech
+                    }
+                    tts = inst
+                    cont.resume(inst)
+                }
+                cont.invokeOnCancellation {
+                    try { engine?.shutdown() } catch (_: Exception) {}
+                }
+            }
         }
     }
 

@@ -5,10 +5,13 @@ import com.universalglasses.core.ConnectionState
 import com.universalglasses.core.DeviceCapabilities
 import com.universalglasses.core.DisplayOptions
 import com.universalglasses.core.GlassesClient
+import com.universalglasses.core.AudioSource
+import com.universalglasses.core.GlassesError
 import com.universalglasses.core.GlassesEvent
 import com.universalglasses.core.GlassesModel
 import com.universalglasses.core.MicrophoneOptions
 import com.universalglasses.core.MicrophoneSession
+import com.universalglasses.core.PlayAudioOptions
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -33,6 +36,8 @@ class FrameGlassesClient(
         canCapturePhoto = true,
         canDisplayText = true,
         canRecordAudio = true,
+        canPlayTts = false,
+        canPlayAudioBytes = false,
         supportsTapEvents = true,
         supportsStreamingTextUpdates = true,
     )
@@ -64,6 +69,10 @@ class FrameGlassesClient(
     override suspend fun capturePhoto(options: CaptureOptions) = bridge.capturePhoto(options)
 
     override suspend fun display(text: String, options: DisplayOptions) = bridge.displayText(text, options)
+
+    override suspend fun playAudio(source: AudioSource, options: PlayAudioOptions): Result<Unit> {
+        return Result.failure(GlassesError.Unsupported("Frame does not have a speaker; audio playback is not supported"))
+    }
 
     override suspend fun startMicrophone(options: MicrophoneOptions): Result<MicrophoneSession> {
         val fmtRes = bridge.startMicrophone(options)

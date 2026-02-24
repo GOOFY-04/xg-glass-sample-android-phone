@@ -149,7 +149,7 @@ class MainActivity : AppCompatActivity() {
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
         } else {
-            listOf("SIMULATOR", "ROKID", "FRAME", "RAYNEO")
+            listOf("ROKID", "FRAME", "RAYNEO", "SIMULATOR")
         }
         spDevice.adapter = ArrayAdapter(
             this,
