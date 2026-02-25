@@ -19,8 +19,8 @@ dependencies {
     api(project(":device-rayneo-installer"))
     api(project(":device-rayneo-runtime"))
 
-    // Emulator/local-sim implementation
-    api(project(":device-sim-emulator"))
+    // Simulator implementation (virtual glasses for development/testing)
+    api(project(":device-simulator"))
 
     // Include Frame when available in this build (i.e., frame_module exists and is included).
     // For published artifacts, ensure the build pipeline always includes device-frame-embedded.

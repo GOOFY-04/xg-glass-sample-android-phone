@@ -57,14 +57,15 @@ import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
 /**
- * Simulator implementation of [GlassesClient] for running on an Android Emulator.
+ * Simulator implementation of [GlassesClient] that simulates glasses functionality
+ * without physical hardware. Designed to run on an Android Emulator.
  *
  * Behavior:
  * - connect()/disconnect(): no physical glasses, so it's effectively a no-op lifecycle.
- * - capturePhoto(): uses Android camera (on Emulator this can be backed by host webcam).
+ * - capturePhoto(): uses Android camera (on Android Emulator this can be backed by host webcam).
  * - display(): shows text in the host UI via a sink provided by the host app.
  */
-class EmulatorGlassesClient(
+class SimulatorGlassesClient(
     private val activity: AppCompatActivity,
     private val displaySink: ((String) -> Unit)? = null,
 ) : GlassesClient {
