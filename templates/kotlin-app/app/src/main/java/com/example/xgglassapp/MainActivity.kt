@@ -219,9 +219,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             val newClient = when (model) {
-                GlassesModel.SIMULATOR -> SimulatorGlassesClient(this@MainActivity) { text ->
-                    tvDisplay.text = text
-                }
+                GlassesModel.SIMULATOR -> SimulatorGlassesClient(
+                    activity = this@MainActivity,
+                    displaySink = { text -> tvDisplay.text = text },
+                    videoPath = BuildConfig.XG_SIM_VIDEO_PATH.takeIf { it.isNotEmpty() },
+                )
                 GlassesModel.ROKID -> createRokidClient()
                 GlassesModel.FRAME -> {
                 // SDK-owned Flutter engine + bridge
@@ -455,26 +457,30 @@ class MainActivity : AppCompatActivity() {
                 text = cmd.title
                 setOnClickListener {
                     scope.launch {
-                        val ctx = UniversalAppContext(
-                            environment = env,
-                            client = client!!,
-                            scope = scope,
-                            log = { appendLog(it) },
-                            onCapturedImage = { img ->
-                                val bytes = img.jpegBytes
-                                if (bytes.isNotEmpty()) {
-                                    scope.launch {
-                                        val bmp = withContext(Dispatchers.Default) {
-                                            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        try {
+                            val ctx = UniversalAppContext(
+                                environment = env,
+                                client = client!!,
+                                scope = scope,
+                                log = { appendLog(it) },
+                                onCapturedImage = { img ->
+                                    val bytes = img.jpegBytes
+                                    if (bytes.isNotEmpty()) {
+                                        scope.launch {
+                                            val bmp = withContext(Dispatchers.Default) {
+                                                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                                            }
+                                            if (bmp != null) ivPreview.setImageBitmap(bmp)
                                         }
-                                        if (bmp != null) ivPreview.setImageBitmap(bmp)
                                     }
-                                }
-                            },
-                            settings = appliedSettings,
-                        )
-                        val r = cmd.run(ctx)
-                        if (r.isFailure) appendLog("Command failed: ${r.exceptionOrNull()?.message ?: "unknown"}")
+                                },
+                                settings = appliedSettings,
+                            )
+                            val r = cmd.run(ctx)
+                            if (r.isFailure) appendLog("Command failed: ${r.exceptionOrNull()?.message ?: "unknown"}")
+                        } catch (e: Exception) {
+                            appendLog("Command error: ${e.javaClass.simpleName}: ${e.message}")
+                        }
                     }
                 }
             })
