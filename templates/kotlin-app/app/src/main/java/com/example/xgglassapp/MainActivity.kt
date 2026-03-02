@@ -149,7 +149,7 @@ class MainActivity : AppCompatActivity() {
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
         } else {
-            listOf("ROKID", "FRAME", "RAYNEO", "SIMULATOR")
+            listOf("ROKID", "FRAME", "RAYNEO", "OMI", "SIMULATOR")
         }
         spDevice.adapter = ArrayAdapter(
             this,
@@ -176,6 +176,7 @@ class MainActivity : AppCompatActivity() {
                 "SIMULATOR" -> GlassesModel.SIMULATOR
                 "FRAME" -> GlassesModel.FRAME
                 "RAYNEO" -> GlassesModel.RAYNEO
+                "OMI" -> GlassesModel.OMI
                 else -> GlassesModel.ROKID
             }
             // Save Rokid credentials entered in the UI before connecting.
@@ -430,6 +431,7 @@ class MainActivity : AppCompatActivity() {
             "SIMULATOR" -> GlassesModel.SIMULATOR
             "FRAME" -> GlassesModel.FRAME
             "RAYNEO" -> GlassesModel.RAYNEO
+            "OMI" -> GlassesModel.OMI
             else -> GlassesModel.ROKID
         }
 

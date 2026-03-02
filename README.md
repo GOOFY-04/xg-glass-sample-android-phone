@@ -39,10 +39,14 @@ Currently we support:
   - x3 Pro Glasses
 - **Simulation**
 
+Newly added:
+
+- **Omi**
+  - Omi Glass (audio-input-focused integration via BLE)
+
 We're working on and will support soon:
 
 - **INMO**
-- **Omi**
 
 Welcome the contributions from the community on more glasses!
 
