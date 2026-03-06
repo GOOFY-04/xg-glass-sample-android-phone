@@ -25,6 +25,26 @@ The `settings.gradle.kts` / `app/build.gradle.kts` / `AndroidManifest.xml` in th
 
 These will be replaced with actual values by `xg-glass init`.
 
+### Meta AI Glasses note
+
+If you want to enable **Meta AI glasses** support in a generated app, configure the Meta DAT GitHub Packages token before building:
+
+```properties
+# ~/.gradle/gradle.properties
+github_token=ghp_xxxxxxxxxxxxx
+```
+
+or:
+
+```bash
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
+```
+
+Notes:
+
+- The token needs at least GitHub `read:packages` scope.
+- When Meta support is enabled, the template host app automatically uses `minSdk 29`.
+
 ### Rokid note (CXR-M v1.0.4)
 
 If you are connecting to **Rokid** glasses, CXR-M **v1.0.4** requires an SN authorization file (`.lc`) and your developer `clientSecret`.
