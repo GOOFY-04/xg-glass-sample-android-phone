@@ -30,16 +30,13 @@ This is what xg.glass has extracted for you from tens of smart glasses SDKs. We 
 
 Currently we support:
 
-- **Rokid**
-  - Rokid Glasses
-- **Meta**
-  - Meta Wearables
-- **Brilliant Labs**
-  - Frame
-- **RayNeo**
-  - x2 Glasses
-  - x3 Pro Glasses
-- **Simulation**
+| Category | Products |
+| --- | --- |
+| Rokid | Rokid Glasses |
+| Meta | Meta Wearables |
+| Brilliant Labs | Frame |
+| RayNeo | x2 Glasses, x3 Pro Glasses |
+| *Simulation* | — |
 
 We're working on and will support soon:
 
@@ -73,26 +70,26 @@ pip install -e .
 
 If a usage menu is printed by `xg-glass --help`, the xg-glass SDK is installed successfully.
 
-#### Meta AI Glasses setup
+#### *Meta AI Glasses setup*
 
-If you want to build with **Meta AI glasses** support, configure a GitHub Packages token for the Meta DAT SDK first.
+*If you want to build with Meta AI glasses support, configure a GitHub Packages token for the Meta DAT SDK first.*
 
-Recommended local setup:
+*Recommended local setup:*
 
 ```properties
 # ~/.gradle/gradle.properties
 github_token=ghp_xxxxxxxxxxxxx
 ```
 
-Shell-based setup:
+*Shell-based setup:*
 
 ```bash
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
 ```
 
-Notes:
+*Notes:*
 
-- The token needs at least GitHub `read:packages` scope.
+- *The token needs at least GitHub `read:packages` scope.*
 
 #### Quickstart
 
@@ -152,6 +149,12 @@ For more details, see the following documentation:
 
 - [Developer Guide](https://xg.glass/developer-guide/)
 - [CLI Reference](https://xg.glass/cli-reference/)
+
+#### AI-assisted development
+
+We also provide [`VIBE_CODING.md`](./VIBE_CODING.md), a comprehensive reference specifically prepared for AI coding assistants such as ChatGPT, Claude, Cursor, and Copilot.
+
+Developers can give this document directly to their AI assistant so it can reference the xg.glass SDK APIs, patterns, and examples when helping build applications.
 
 ### Contributors (extend the SDK)
 
