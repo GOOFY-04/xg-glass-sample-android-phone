@@ -4,6 +4,7 @@ plugins {
     id("com.universalglasses.rayneo.app")
 }
 
+import java.io.File
 import java.util.Properties
 
 // Device-specific local config (do NOT commit secrets).
@@ -17,13 +18,30 @@ val _localPropsFile = rootProject.file("local.properties")
 if (_localPropsFile.exists()) {
     _localPropsFile.inputStream().use { _localProps.load(it) }
 }
+val _sdkLocalProps = Properties()
+val _sdkLocalPropsFile = File(rootDir, "__XG_SDK_PATH__/local.properties")
+if (_sdkLocalPropsFile.exists()) {
+    _sdkLocalPropsFile.inputStream().use { _sdkLocalProps.load(it) }
+}
 fun _propOrEnv(key: String, envKey: String): String =
-    (_localProps.getProperty(key) ?: System.getenv(envKey) ?: "").trim()
+    (
+        _localProps.getProperty(key)
+            ?: _sdkLocalProps.getProperty(key)
+            ?: System.getenv(envKey)
+            ?: ""
+    ).trim()
 fun _escapeForBuildConfig(s: String): String =
     s.replace("\\", "\\\\").replace("\"", "\\\"")
 
 val rokidClientSecret = _propOrEnv("rokid.clientSecret", "ROKID_CLIENT_SECRET")
 val rokidSnRawName = _propOrEnv("rokid.snRawName", "ROKID_SN_RAW_NAME")
+val metaGithubToken = (
+    providers.gradleProperty("github_token").orNull
+        ?: providers.environmentVariable("GITHUB_TOKEN").orNull
+        ?: ""
+).trim()
+val hasMetaDatAccess = metaGithubToken.isNotEmpty()
+val appMinSdk = if (hasMetaDatAccess) 29 else 28
 
 android {
     namespace = "com.example.xgglassapp"
@@ -31,7 +49,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.xgglassapp"
-        minSdk = 28
+        minSdk = appMinSdk
         targetSdk = 34
         versionCode = 1
         versionName = "0.0.1"

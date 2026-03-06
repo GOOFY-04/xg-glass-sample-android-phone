@@ -2,6 +2,7 @@ package com.universalglasses.core
 
 enum class GlassesModel {
     FRAME,
+    META,
     ROKID,
     RAYNEO,
     SIMULATOR,

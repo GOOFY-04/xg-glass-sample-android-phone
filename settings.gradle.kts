@@ -1,3 +1,10 @@
+val metaGithubToken = (
+    providers.gradleProperty("github_token").orNull
+        ?: providers.environmentVariable("GITHUB_TOKEN").orNull
+        ?: ""
+).trim()
+val hasMetaDatAccess = metaGithubToken.isNotEmpty()
+
 pluginManagement {
     includeBuild("build-logic")
     repositories {
@@ -25,6 +32,22 @@ dependencyResolutionManagement {
                 includeGroupByRegex("com\\.rokid(\\..+)?")
             }
         }
+        if (hasMetaDatAccess) {
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
+                        credentials {
+                            username = ""
+                            password = metaGithubToken
+                        }
+                    }
+                }
+                filter {
+                    includeGroupByRegex("com\\.meta\\.wearable(\\..+)?")
+                }
+            }
+        }
     }
 }
 
@@ -35,6 +58,9 @@ include(":universal")
 include(":core")
 include(":app-contract")
 include(":device-rokid")
+if (hasMetaDatAccess) {
+    include(":device-meta")
+}
 include(":device-frame-flutter")
 include(":device-rayneo-installer")
 include(":device-rayneo-runtime")
@@ -42,6 +68,9 @@ include(":device-simulator")
 
 // Keep Gradle module names stable, but place implementations under a dedicated folder.
 project(":device-rokid").projectDir = file("devices/device-rokid")
+if (hasMetaDatAccess) {
+    project(":device-meta").projectDir = file("devices/device-meta")
+}
 project(":device-frame-flutter").projectDir = file("devices/device-frame-flutter")
 project(":device-rayneo-installer").projectDir = file("devices/device-rayneo-installer")
 project(":device-rayneo-runtime").projectDir = file("devices/device-rayneo-runtime")

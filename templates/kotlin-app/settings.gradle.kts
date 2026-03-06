@@ -1,3 +1,10 @@
+val metaGithubToken = (
+    providers.gradleProperty("github_token").orNull
+        ?: providers.environmentVariable("GITHUB_TOKEN").orNull
+        ?: ""
+).trim()
+val hasMetaDatAccess = metaGithubToken.isNotEmpty()
+
 pluginManagement {
     // Provide Universal Glasses build logic (RayNeo host generator + wiring plugin)
     // Replaced by xg-glass init: __XG_SDK_PATH__/build-logic
@@ -29,6 +36,22 @@ dependencyResolutionManagement {
             }
             filter {
                 includeGroupByRegex("com\\.rokid(\\..+)?")
+            }
+        }
+        if (hasMetaDatAccess) {
+            exclusiveContent {
+                forRepository {
+                    maven {
+                        url = uri("https://maven.pkg.github.com/facebook/meta-wearables-dat-android")
+                        credentials {
+                            username = ""
+                            password = metaGithubToken
+                        }
+                    }
+                }
+                filter {
+                    includeGroupByRegex("com\\.meta\\.wearable(\\..+)?")
+                }
             }
         }
     }
