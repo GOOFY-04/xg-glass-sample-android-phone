@@ -6,8 +6,8 @@ This module integrates **Omi Glass** into the unified `xg-glass` API surface.
 - **Model**: `GlassesModel.OMI`.
 - **Capabilities**:
   - Audio input (microphone streaming) over BLE – surfaced via `startMicrophone`.
-  - No camera, display, or audio playback primitives are exposed in the public BLE docs, so:
-    - `capturePhoto` returns `GlassesError.Unsupported`.
+  - Photo capture over BLE – surfaced via `capturePhoto`.
+  - No display or audio playback primitives are exposed in the public BLE docs, so:
     - `display` returns `GlassesError.Unsupported`.
     - `playAudio` returns `GlassesError.Unsupported`.
 

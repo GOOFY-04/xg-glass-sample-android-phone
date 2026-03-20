@@ -43,6 +43,7 @@ Write your app logic once against these four APIs, and it runs on all supported 
 | Meta AI Glasses | `GlassesModel.META` | Yes | No | Yes | Yes (raw) |
 | Brilliant Labs Frame | `GlassesModel.FRAME` | Yes | Yes | Yes | No |
 | RayNeo x2 / x3 Pro | `GlassesModel.RAYNEO` | Yes | Yes | Yes | Yes (raw) |
+| Omi Glass | `GlassesModel.OMI` | Yes | No | Yes | No |
 | Simulator (Emulator) | `GlassesModel.SIMULATOR` | Yes (webcam/video) | Yes | Yes | Yes (TTS + raw) |
 
 Check capabilities at runtime via `ctx.client.capabilities`:
@@ -81,7 +82,7 @@ An xg.glass app consists of a single Kotlin file implementing `UniversalAppEntry
 └──────────────────────────────────────────┘
           ↕
 ┌──────────────────────────────────────────┐
-│  Rokid / Meta / Frame / RayNeo / Simulator │
+│  Rokid / Meta / Frame / RayNeo / Omi / Sim │
 └──────────────────────────────────────────┘
 ```
 
@@ -526,7 +527,7 @@ enum class HostKind {
 ```kotlin
 data class HostEnvironment(
     val hostKind: HostKind,   // PHONE or GLASSES
-    val model: GlassesModel,  // ROKID, FRAME, RAYNEO, SIMULATOR
+    val model: GlassesModel,  // ROKID, META, FRAME, RAYNEO, OMI, SIMULATOR
 )
 ```
 
