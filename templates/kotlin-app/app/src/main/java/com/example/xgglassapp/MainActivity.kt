@@ -2,6 +2,7 @@ package com.example.xgglassapp
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Bundle
@@ -14,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.Spinner
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.universalglasses.appcontract.HostEnvironment
@@ -24,22 +26,30 @@ import com.universalglasses.appcontract.UserSettingField
 import com.universalglasses.appcontract.UserSettingInputType
 import com.universalglasses.appcontract.commandsWithDefaults
 import com.universalglasses.core.ConnectionState
+import com.universalglasses.core.ExternalActivityBridge
+import com.universalglasses.core.ExternalActivityResult
 import com.universalglasses.core.GlassesEvent
+import com.universalglasses.core.GlassesClient
 import com.universalglasses.core.GlassesModel
 import com.universalglasses.device.frame.embedded.EmbeddedFrameGlassesClient
 import com.universalglasses.device.rayneo.installer.RayNeoApkSource
 import com.universalglasses.device.rayneo.installer.RayNeoInstallerConfig
 import com.universalglasses.device.rayneo.installer.RayNeoInstallerGlassesClient
 import com.universalglasses.device.rokid.RokidGlassesClient
+import com.universalglasses.device.omi.OmiGlassesClient
 import com.universalglasses.device.sim.SimulatorGlassesClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import kotlin.coroutines.resume
 
 class MainActivity : AppCompatActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -71,11 +81,13 @@ class MainActivity : AppCompatActivity() {
     /** Current applied settings (key → value). */
     private var appliedSettings: Map<String, String> = emptyMap()
 
-    private var client: com.universalglasses.core.GlassesClient? = null
+    private var client: GlassesClient? = null
     private var connectJob: Job? = null
     private var stateJob: Job? = null
     private var eventsJob: Job? = null
     private var pendingConnectModel: GlassesModel? = null
+    private var externalActivityContinuation: kotlinx.coroutines.CancellableContinuation<ExternalActivityResult>? = null
+    private val externalActivityMutex = Mutex()
 
     private val requestPermissionsLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -90,6 +102,20 @@ class MainActivity : AppCompatActivity() {
         val model = pendingConnectModel
         pendingConnectModel = null
         if (model != null) connect(model)
+    }
+
+    private val externalActivityLauncher = registerForActivityResult(StartActivityForResult()) { result ->
+        externalActivityContinuation?.let { continuation ->
+            if (continuation.isActive) {
+                continuation.resume(
+                    ExternalActivityResult(
+                        resultCode = result.resultCode,
+                        data = result.data,
+                    )
+                )
+            }
+        }
+        externalActivityContinuation = null
     }
 
     /** Launcher for picking the Rokid SN license (.lc) file at runtime. */
@@ -149,7 +175,7 @@ class MainActivity : AppCompatActivity() {
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
         } else {
-            listOf("ROKID", "FRAME", "RAYNEO", "OMI", "SIMULATOR")
+            listOf("ROKID", "META", "FRAME", "RAYNEO", "OMI", "SIMULATOR")
         }
         spDevice.adapter = ArrayAdapter(
             this,
@@ -174,6 +200,7 @@ class MainActivity : AppCompatActivity() {
             val selected = spDevice.selectedItem?.toString() ?: "ROKID"
             val model = when (selected) {
                 "SIMULATOR" -> GlassesModel.SIMULATOR
+                "META" -> GlassesModel.META
                 "FRAME" -> GlassesModel.FRAME
                 "RAYNEO" -> GlassesModel.RAYNEO
                 "OMI" -> GlassesModel.OMI
@@ -210,78 +237,87 @@ class MainActivity : AppCompatActivity() {
             btnConnect.isEnabled = false
             tvStatus.text = "Status: switching to ${model.name}..."
 
-            // Disconnect previous client FIRST (sequentially) so we don't accidentally destroy the new one.
-            val old = client
-            client = null
             try {
-                old?.disconnect()
-            } catch (e: Exception) {
-                appendLog("WARN: disconnect previous client failed: ${e.message}")
-            }
-
-            val newClient = when (model) {
-                GlassesModel.SIMULATOR -> SimulatorGlassesClient(
-                    activity = this@MainActivity,
-                    displaySink = { text -> tvDisplay.text = text },
-                    videoPath = BuildConfig.XG_SIM_VIDEO_PATH.takeIf { it.isNotEmpty() },
-                )
-                GlassesModel.ROKID -> createRokidClient()
-                GlassesModel.FRAME -> {
-                // SDK-owned Flutter engine + bridge
-                EmbeddedFrameGlassesClient(this@MainActivity)
+                // Disconnect previous client FIRST (sequentially) so we don't accidentally destroy the new one.
+                val old = client
+                client = null
+                try {
+                    old?.disconnect()
+                } catch (e: Exception) {
+                    appendLog("WARN: disconnect previous client failed: ${e.message}")
                 }
-                GlassesModel.RAYNEO -> {
-                    val host = etRayNeoIp.text?.toString()?.trim().orEmpty()
-                    if (host.isBlank()) {
-                        appendLog("RayNeo: please input glasses IP address first.")
-                        tvStatus.text = "Status: RayNeo IP missing"
-                        btnConnect.isEnabled = true
-                        return@launch
-                    }
-                    RayNeoInstallerGlassesClient(
-                        context = this@MainActivity,
-                        config = RayNeoInstallerConfig(
-                            host = host,
-                            apk = RayNeoApkSource.Asset("rayneo_glass_app.apk"),
-                        )
+
+                val newClient = when (model) {
+                    GlassesModel.SIMULATOR -> SimulatorGlassesClient(
+                        activity = this@MainActivity,
+                        displaySink = { text -> tvDisplay.text = text },
+                        videoPath = BuildConfig.XG_SIM_VIDEO_PATH.takeIf { it.isNotEmpty() },
                     )
+                    GlassesModel.ROKID -> createRokidClient()
+                    GlassesModel.META -> createMetaClient()
+                    GlassesModel.FRAME -> {
+                    // SDK-owned Flutter engine + bridge
+                    EmbeddedFrameGlassesClient(this@MainActivity)
+                    }
+                    GlassesModel.RAYNEO -> {
+                        val host = etRayNeoIp.text?.toString()?.trim().orEmpty()
+                        if (host.isBlank()) {
+                            appendLog("RayNeo: please input glasses IP address first.")
+                            tvStatus.text = "Status: RayNeo IP missing"
+                            return@launch
+                        }
+                        RayNeoInstallerGlassesClient(
+                            context = this@MainActivity,
+                            config = RayNeoInstallerConfig(
+                                host = host,
+                                apk = RayNeoApkSource.Asset("rayneo_glass_app.apk"),
+                            )
+                        )
+                    }
+                    GlassesModel.OMI -> OmiGlassesClient(this@MainActivity)
                 }
-            }
-            client = newClient
 
-            // Restart collectors for the new client.
-            stateJob?.cancel()
-            eventsJob?.cancel()
+                client = newClient
 
-            stateJob = launch {
-                newClient.state.collectLatest { st ->
-                    tvStatus.text = "Status: $st"
-                    val connected = st is ConnectionState.Connected
-                    renderCommandsForCurrentSelection(connected = connected)
-                }
-            }
+                // Restart collectors for the new client.
+                stateJob?.cancel()
+                eventsJob?.cancel()
 
-            eventsJob = launch {
-                newClient.events.collectLatest { ev ->
-                    when (ev) {
-                        is GlassesEvent.Log -> appendLog(ev.message)
-                        is GlassesEvent.Warning -> appendLog("WARN: ${ev.message}")
-                        is GlassesEvent.Tap -> appendLog("TAP: ${ev.count}")
+                stateJob = launch {
+                    newClient.state.collectLatest { st ->
+                        tvStatus.text = "Status: $st"
+                        val connected = st is ConnectionState.Connected
+                        renderCommandsForCurrentSelection(connected = connected)
                     }
                 }
+
+                eventsJob = launch {
+                    newClient.events.collectLatest { ev ->
+                        when (ev) {
+                            is GlassesEvent.Log -> appendLog(ev.message)
+                            is GlassesEvent.Warning -> appendLog("WARN: ${ev.message}")
+                            is GlassesEvent.Tap -> appendLog("TAP: ${ev.count}")
+                        }
+                    }
+                }
+
+                val r = newClient.connect()
+                appendLog("connect(${model.name}) => ${r.isSuccess} ${r.exceptionOrNull()?.message ?: ""}")
+
+                // After successful RayNeo install, push the current user settings to the glasses.
+                if (r.isSuccess && newClient is RayNeoInstallerGlassesClient && appliedSettings.isNotEmpty()) {
+                    val pushR = newClient.pushUserSettings(appliedSettings)
+                    if (pushR.isSuccess) appendLog("Settings synced to RayNeo glasses.")
+                    else appendLog("Settings sync failed: ${pushR.exceptionOrNull()?.message}")
+                }
+            } catch (e: Exception) {
+                client = null
+                appendLog("connect(${model.name}) crashed: ${e.message ?: e.javaClass.simpleName}")
+                tvStatus.text = "Status: connect failed"
+                renderCommandsForCurrentSelection(connected = false)
+            } finally {
+                btnConnect.isEnabled = true
             }
-
-            val r = newClient.connect()
-            appendLog("connect(${model.name}) => ${r.isSuccess} ${r.exceptionOrNull()?.message ?: ""}")
-
-            // After successful RayNeo install, push the current user settings to the glasses.
-            if (r.isSuccess && newClient is RayNeoInstallerGlassesClient && appliedSettings.isNotEmpty()) {
-                val pushR = newClient.pushUserSettings(appliedSettings)
-                if (pushR.isSuccess) appendLog("Settings synced to RayNeo glasses.")
-                else appendLog("Settings sync failed: ${pushR.exceptionOrNull()?.message}")
-            }
-
-            btnConnect.isEnabled = true
         }
     }
 
@@ -305,6 +341,37 @@ class MainActivity : AppCompatActivity() {
             this,
             RokidGlassesClient.RokidOptions(authorization = auth),
         )
+    }
+
+    private fun createMetaClient(): GlassesClient {
+        return try {
+            val clazz = Class.forName("com.universalglasses.device.meta.MetaWearablesGlassesClient")
+            val ctor = clazz.getConstructor(AppCompatActivity::class.java, ExternalActivityBridge::class.java)
+            ctor.newInstance(
+                this,
+                ExternalActivityBridge { intent -> launchExternalActivity(intent) },
+            ) as GlassesClient
+        } catch (_: ClassNotFoundException) {
+            throw IllegalStateException(
+                "Meta DAT module is not available in this build. Set github_token in ~/.gradle/gradle.properties or export GITHUB_TOKEN, then sync again."
+            )
+        } catch (e: Exception) {
+            throw IllegalStateException("Failed to create MetaWearablesGlassesClient: ${e.message}", e)
+        }
+    }
+
+    private suspend fun launchExternalActivity(intent: Intent): ExternalActivityResult {
+        return externalActivityMutex.withLock {
+            suspendCancellableCoroutine { continuation ->
+                externalActivityContinuation = continuation
+                continuation.invokeOnCancellation {
+                    if (externalActivityContinuation === continuation) {
+                        externalActivityContinuation = null
+                    }
+                }
+                externalActivityLauncher.launch(intent)
+            }
+        }
     }
 
     /**
@@ -373,8 +440,15 @@ class MainActivity : AppCompatActivity() {
             perms += Manifest.permission.RECORD_AUDIO
         }
 
-        // BLE permissions (Frame + Rokid only)
-        if (model == GlassesModel.ROKID || model == GlassesModel.FRAME) {
+        if (model == GlassesModel.META) {
+            perms += Manifest.permission.RECORD_AUDIO
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                perms += Manifest.permission.BLUETOOTH_CONNECT
+            }
+        }
+
+        // BLE permissions (Frame + Rokid + OMI)
+        if (model == GlassesModel.ROKID || model == GlassesModel.FRAME || model == GlassesModel.OMI) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 perms += Manifest.permission.BLUETOOTH_SCAN
                 perms += Manifest.permission.BLUETOOTH_CONNECT
@@ -429,6 +503,7 @@ class MainActivity : AppCompatActivity() {
     private fun renderCommandsForCurrentSelection(connected: Boolean) {
         val model = when (spDevice.selectedItem?.toString()) {
             "SIMULATOR" -> GlassesModel.SIMULATOR
+            "META" -> GlassesModel.META
             "FRAME" -> GlassesModel.FRAME
             "RAYNEO" -> GlassesModel.RAYNEO
             "OMI" -> GlassesModel.OMI

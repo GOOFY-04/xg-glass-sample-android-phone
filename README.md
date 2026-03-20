@@ -30,14 +30,13 @@ This is what xg.glass has extracted for you from tens of smart glasses SDKs. We 
 
 Currently we support:
 
-- **Rokid**
-  - Rokid Glasses
-- **Brilliant Labs**
-  - Frame
-- **RayNeo**
-  - x2 Glasses
-  - x3 Pro Glasses
-- **Simulation**
+| Category | Products |
+| --- | --- |
+| Rokid | Rokid Glasses |
+| Meta | Meta Wearables |
+| Brilliant Labs | Frame |
+| RayNeo | x2 Glasses, x3 Pro Glasses |
+| *Simulation* | — |
 
 Newly added:
 
@@ -75,6 +74,27 @@ pip install -e .
 
 If a usage menu is printed by `xg-glass --help`, the xg-glass SDK is installed successfully.
 
+#### *Meta AI Glasses setup*
+
+*If you want to build with Meta AI glasses support, configure a GitHub Packages token for the Meta DAT SDK first.*
+
+*Recommended local setup:*
+
+```properties
+# ~/.gradle/gradle.properties
+github_token=ghp_xxxxxxxxxxxxx
+```
+
+*Shell-based setup:*
+
+```bash
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
+```
+
+*Notes:*
+
+- *The token needs at least GitHub `read:packages` scope.*
+
 #### Quickstart
 
 The fastest workflow is to run a single Kotlin file:
@@ -111,7 +131,7 @@ xg-glass install
 xg-glass run
 ```
 
-The launch of Android Emulator may take serval minutes. You can keep it on to save time for the next run. 
+The launch of Android Emulator may take serval minutes. You can keep it on to save time for the next run.
 
 #### Simulator with pre-recorded datasets
 
@@ -120,16 +140,25 @@ We support simulation with online or local video datasets.
 ```bash
 xg-glass run --sim --video_url <video.url> /path/to/MyEntry.kt
 ```
+
 or
+
 ```bash
 xg-glass run --sim --local_video </path/to/local/video.mp4> /path/to/MyEntry.kt
 ```
+
 We currently support video from YouTube and Bilibili.
 
 For more details, see the following documentation:
 
 - [Developer Guide](https://xg.glass/developer-guide/)
 - [CLI Reference](https://xg.glass/cli-reference/)
+
+#### AI-assisted development
+
+We also provide [`VIBE_CODING.md`](./VIBE_CODING.md), a comprehensive reference specifically prepared for AI coding assistants such as ChatGPT, Claude, Cursor, and Copilot.
+
+Developers can give this document directly to their AI assistant so it can reference the xg.glass SDK APIs, patterns, and examples when helping build applications.
 
 ### Contributors (extend the SDK)
 

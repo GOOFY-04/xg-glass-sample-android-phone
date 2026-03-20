@@ -14,6 +14,9 @@ dependencies {
 
     // Always include Rokid implementation
     api(project(":device-rokid"))
+    if (project.findProject(":device-meta") != null) {
+        api(project(":device-meta"))
+    }
 
     // RayNeo: installer (phone-side) + runtime (on-glasses)
     api(project(":device-rayneo-installer"))

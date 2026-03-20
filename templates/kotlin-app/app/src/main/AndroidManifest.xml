@@ -27,6 +27,11 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.XgGlassApp">
 
+        <!-- Use 0 while developing with Meta DAT developer mode enabled. -->
+        <meta-data
+            android:name="com.meta.wearable.mwdat.APPLICATION_ID"
+            android:value="0" />
+
         <!-- Developer entry class (loaded by phone host to render commands) -->
         <meta-data
             android:name="com.universalglasses.app_entry_class"
@@ -39,6 +44,12 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="${applicationId}" />
             </intent-filter>
         </activity>
     </application>
