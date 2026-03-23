@@ -36,6 +36,7 @@ import com.universalglasses.device.rayneo.installer.RayNeoApkSource
 import com.universalglasses.device.rayneo.installer.RayNeoInstallerConfig
 import com.universalglasses.device.rayneo.installer.RayNeoInstallerGlassesClient
 import com.universalglasses.device.rokid.RokidGlassesClient
+import com.universalglasses.device.omi.OmiGlassesClient
 import com.universalglasses.device.sim.SimulatorGlassesClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -174,7 +175,7 @@ class MainActivity : AppCompatActivity() {
         val deviceItems = if (BuildConfig.XG_SIMULATOR) {
             listOf("SIMULATOR")
         } else {
-            listOf("ROKID", "META", "FRAME", "RAYNEO", "SIMULATOR")
+            listOf("ROKID", "META", "FRAME", "RAYNEO", "OMI", "SIMULATOR")
         }
         spDevice.adapter = ArrayAdapter(
             this,
@@ -202,6 +203,7 @@ class MainActivity : AppCompatActivity() {
                 "META" -> GlassesModel.META
                 "FRAME" -> GlassesModel.FRAME
                 "RAYNEO" -> GlassesModel.RAYNEO
+                "OMI" -> GlassesModel.OMI
                 else -> GlassesModel.ROKID
             }
             // Save Rokid credentials entered in the UI before connecting.
@@ -272,6 +274,7 @@ class MainActivity : AppCompatActivity() {
                             )
                         )
                     }
+                    GlassesModel.OMI -> OmiGlassesClient(this@MainActivity)
                 }
 
                 client = newClient
@@ -444,8 +447,8 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // BLE permissions (Frame + Rokid only)
-        if (model == GlassesModel.ROKID || model == GlassesModel.FRAME) {
+        // BLE permissions (Frame + Rokid + OMI)
+        if (model == GlassesModel.ROKID || model == GlassesModel.FRAME || model == GlassesModel.OMI) {
             if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                 perms += Manifest.permission.BLUETOOTH_SCAN
                 perms += Manifest.permission.BLUETOOTH_CONNECT
@@ -503,6 +506,7 @@ class MainActivity : AppCompatActivity() {
             "META" -> GlassesModel.META
             "FRAME" -> GlassesModel.FRAME
             "RAYNEO" -> GlassesModel.RAYNEO
+            "OMI" -> GlassesModel.OMI
             else -> GlassesModel.ROKID
         }
 
