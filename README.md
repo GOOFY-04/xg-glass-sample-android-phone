@@ -36,12 +36,8 @@ Currently we support:
 | Meta | Meta Wearables |
 | Brilliant Labs | Frame |
 | RayNeo | x2 Glasses, x3 Pro Glasses |
+| Omi | Omi Glass |
 | *Simulation* | — |
-
-Newly added:
-
-- **Omi**
-  - Omi Glass (audio-input-focused integration via BLE)
 
 We're working on and will support soon:
 
