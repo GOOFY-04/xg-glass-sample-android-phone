@@ -19,12 +19,13 @@ Easy, fast, glasses application development for everyone
 
 xg.glass is a fast and easy-to-use library for smart glasses application development.
 
-Smart glasses development is supposed to be easy. If you want to build an application, all you need is the following four interfaces:
+Smart glasses development is supposed to be easy. If you want to build an application, all you need is the following **five** interfaces:
 
-- Video input from the camera
-- Audio input from the microphone
-- Display output
-- Audio output
+- Video input from the camera (📸 capturePhoto)
+- Audio input from the microphone (🎤 startMicrophone)
+- Display output (🖥️ display)
+- Audio output (🔊 playAudio)
+- **AI inference** (🤖 aiGenerate) — NEW: on-device or cloud-powered multimodal reasoning
 
 This is what xg.glass has extracted for you from tens of smart glasses SDKs. We hide all details of communicating with difference glasses' SDKs and make sure that the code that you develop based on xg.glass can smoothly run on multiple glasses or a simulator without any single line of additional effort.
 
@@ -37,6 +38,7 @@ Currently we support:
 | Brilliant Labs | Frame |
 | RayNeo | x2 Glasses, x3 Pro Glasses |
 | Omi | Omi Glass |
+| PhoneGlasses | 📱 Phone-based simulator with on-device AI (JNI llama.cpp) |
 | *Simulation* | — |
 
 We're working on and will support soon:
@@ -44,6 +46,44 @@ We're working on and will support soon:
 - **INMO**
 
 Welcome the contributions from the community on more glasses!
+
+## The Fifth Primitive: AI Inference
+
+`GlassesClient` now includes a **fifth primitive** — `aiGenerate()` — for on-device and cloud-powered AI reasoning:
+
+```kotlin
+suspend fun aiGenerate(
+    prompt: String,
+    imageBase64: String? = null,
+    options: AiGenerateOptions = AiGenerateOptions(),
+): Result<String>
+```
+
+| Feature | Description |
+|:---|:---|
+| 🧠 **Multimodal** | Text + image input, text output |
+| ☁️ **Cloud API** | OpenAI (gpt-4o) and Anthropic (claude-sonnet-4) via `AiCloudConfig` |
+| 📱 **On-device** | JNI-embedded llama.cpp (PhoneGlasses) — no network needed |
+| 🔄 **Two-stage** | `aiGenerateTwoStage()` – vision OCR → text reasoning pipeline |
+
+Default implementation returns `GlassesError.Unsupported` — devices opt in by implementing it.
+
+### PhoneGlasses
+
+PhoneGlasses is a phone-based smart glasses simulator that turns your Android phone into a
+fully-functional AI glasses device. It uses the phone's built-in camera, microphone, and
+speaker to simulate all five primitives:
+
+| Primitive | Phone Implementation |
+|:---|:---|
+| 📸 capturePhoto | CameraX (back camera) |
+| 🖥️ display | TextView overlay in host Activity |
+| 🔊 playAudio | TTS (TextToSpeech) + PCM/encoded audio |
+| 🎤 startMicrophone | AudioRecord (16kHz mono PCM) |
+| 🤖 aiGenerate | **JNI llama.cpp** (local GGUF models) + **cloud API** (OpenAI/Anthropic) |
+
+Models (.gguf + mmproj) are loaded from `/sdcard/PhoneGlassesModels/`. Cloud API
+credentials are configured via `AiCloudConfig` passed through `AiGenerateOptions`.
 
 ## Getting Started
 

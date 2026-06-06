@@ -66,6 +66,7 @@ include(":device-rayneo-installer")
 include(":device-rayneo-runtime")
 include(":device-simulator")
 include(":device-omi")
+include(":device-phoneglasses")
 
 // Keep Gradle module names stable, but place implementations under a dedicated folder.
 project(":device-rokid").projectDir = file("devices/device-rokid")
@@ -77,6 +78,7 @@ project(":device-rayneo-installer").projectDir = file("devices/device-rayneo-ins
 project(":device-rayneo-runtime").projectDir = file("devices/device-rayneo-runtime")
 project(":device-simulator").projectDir = file("devices/device-simulator")
 project(":device-omi").projectDir = file("devices/device-omi")
+project(":device-phoneglasses").projectDir = file("devices/device-phoneglasses")
 
 // Embed the generated Flutter module as an internal dependency when available.
 // This avoids requiring app developers to manually include the Flutter module.
